@@ -99,9 +99,14 @@ def test_wati_payload_shapes():
 
 
 def test_as_text_fallback_lists_options():
+    """The fallback must never number the options: a customer answering "1" would be typing something
+    the parser has to read as a whole message, and "1" is the English button on the language screen."""
     o = menus.so_list(_rows({"45240": ["FG-1"]}), "en")
-    assert "1. SO 45240" in o.as_text()
+    text = o.as_text()
+    assert "• SO 45240" in text and "1. SO 45240" not in text
     assert menus.confirm_buttons("en").as_text() == "• Yes\n• No"
+    # every line is answerable by typing it back
+    assert regex_parse("SO 45240").so_no == "45240"
 
 
 @pytest.mark.parametrize(

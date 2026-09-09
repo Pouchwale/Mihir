@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 import respx
 from httpx import Response
@@ -8,8 +6,7 @@ from app.adapters import HttpSource, map_rows
 from app.adapters.orders_base import resolve_headers
 from app.adapters.parsers import detect_format, parse
 from app.config import DEFAULT_COLUMN_MAP, get_settings
-
-FX = Path(__file__).resolve().parent.parent / "fixtures"
+from tests.conftest import FIXTURES as FX  # generated dummy orders, never the owner's live files
 
 
 def _load(fmt: str):

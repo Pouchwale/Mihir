@@ -15,28 +15,47 @@ _TEST_DB = BACKEND / "test_order_bot.db"
 # Run against MySQL with:  $env:TEST_DATABASE_URL = "mysql+aiomysql://root:root@localhost:3306/order_bot_test"
 _DB_URL = os.environ.get("TEST_DATABASE_URL") or f"sqlite+aiosqlite:///{_TEST_DB.as_posix()}"
 
-# The tests always use the 10 built-in dummy customers, written fresh here, so editing
-# fixtures/customers_dummy.xlsx (e.g. to put your own WhatsApp number in for a live test) never
-# breaks the test suite.
-from scripts.make_fixtures import write_customers  # noqa: E402
+# The tests always use the 10 built-in dummy customers and 10 dummy orders, written fresh here into
+# tests/_generated. Editing anything under backend/fixtures (putting your own WhatsApp number in the
+# customer Excel, trimming the order table to your own rows) is exactly what those files are for and
+# must never change a test result.
+from scripts.make_fixtures import write_customers, write_orders  # noqa: E402
 
-CUSTOMERS_XLSX = write_customers(BACKEND / "tests" / "_generated" / "customers_dummy.xlsx")
+GENERATED = BACKEND / "tests" / "_generated"
+CUSTOMERS_XLSX = write_customers(GENERATED / "customers_dummy.xlsx")
+FIXTURES = write_orders(GENERATED)  # orders_dummy.{json,csv,xlsx,html}
+
+# Every setting the suite depends on is pinned here. backend/.env holds real credentials once the bot
+# goes live (WATI token, Dropbox, a real tenant URL); none of it may leak into a test run.
 os.environ.update(
     {
         "APP_MODE": "dev",
         "DATABASE_URL": _DB_URL,
+        "WATI_BASE_URL": "https://live-mt-server.wati.io/999999",
         "WATI_TOKEN": "",
         "WATI_DRY_RUN": "",
+        "WATI_API_VERSION": "v1",
+        "VOICE_NOTES": "true",  # the voice-note flows are part of the suite
         "GROQ_API_KEY": "",
         "OPENAI_API_KEY": "",
         "ADMIN_KEY": "test-admin",
         "WATI_WEBHOOK_TOKEN": "test-hook",
         "SUPPORT_CONTACT": "support@test",
+        "ALERT_SLACK_WEBHOOK": "",
         "ORDERS_SOURCE": "file",
-        "ORDERS_FILE_PATH": "fixtures/orders_dummy.json",
+        "ORDERS_FILE_PATH": (FIXTURES / "orders_dummy.json").relative_to(BACKEND).as_posix(),
+        "ORDERS_API_URL": "",
+        "ORDERS_API_KEY": "",
+        "CUSTOMERS_SOURCE": "local",
         "CUSTOMERS_FILE_PATH": CUSTOMERS_XLSX.relative_to(BACKEND).as_posix(),
+        "DROPBOX_APP_KEY": "",
+        "DROPBOX_APP_SECRET": "",
+        "DROPBOX_REFRESH_TOKEN": "",
+        "SO_MENU_STYLE": "auto",
+        "SESSION_TIMEOUT_MIN": "30",
         "FG_MAX_ATTEMPTS": "2",
         "RATE_LIMIT_MSGS": "1000",
+        "RATE_LIMIT_WINDOW_MIN": "10",
     }
 )
 

@@ -62,6 +62,8 @@ export const api = {
   queue: () => req<QueueRow[]>("/queue"),
   simulate: (phone: string, text: string, type: "text" | "audio" = "text", selection?: Selection) =>
     req<SimResult>("/simulate", { method: "POST", body: JSON.stringify({ phone, text, type, selection }) }),
+  // go-live readiness
+  readiness: (deep = true) => req<Readiness>(`/readiness?deep=${deep}`),
   // data connections
   connections: () => req<Connections>("/connections"),
   saveConnections: (values: Record<string, unknown>) => req<{ ok: boolean; errors: Record<string, string>; fields?: Record<string, ConnField> }>("/connections", { method: "PUT", body: JSON.stringify({ values }) }),
@@ -81,6 +83,12 @@ export const api = {
   customTest: (text: string) => req<{ match: CustomReply | null }>("/templates/custom/test", { method: "POST", body: JSON.stringify({ text }) }),
 };
 
+export type CheckStatus = "pass" | "warn" | "fail";
+export interface Check { key: string; title: string; status: CheckStatus; detail: string; fix: string; where: string; group: string }
+export interface Readiness {
+  ready: boolean; mode: string; deep: boolean; checked_at: string;
+  counts: { pass: number; warn: number; fail: number }; checks: Check[];
+}
 export interface ConnField { value: unknown; is_set: boolean | null; secret: boolean; from_db: boolean; choices: string[]; type: string }
 export interface Connections {
   fields: Record<string, ConnField>; column_fields: string[]; required_columns: string[]; customers_source_effective: string;

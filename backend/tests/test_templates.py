@@ -160,10 +160,26 @@ async def test_custom_reply_flow(clean_templates, clean_sessions):
 
 @pytest.mark.asyncio
 async def test_short_trigger_matches_only_whole_message(clean_templates):
-    await T.save_custom(T.CustomReply(key="hi-test", title="x", triggers=["ok"], texts={"en": "OK reply", "hi": "", "gu": ""}))
-    assert T.registry.match_custom("ok") is not None
-    assert T.registry.match_custom("OK!") is not None
-    assert T.registry.match_custom("book my order") is None  # 'ok' inside a word must not match
+    await T.save_custom(T.CustomReply(key="gst-test", title="x", triggers=["gst"], texts={"en": "GST reply", "hi": "", "gu": ""}))
+    assert T.registry.match_custom("gst") is not None
+    assert T.registry.match_custom("GST!") is not None
+    assert T.registry.match_custom("suggested") is None  # 'gst' inside a word must not match
+
+
+@pytest.mark.asyncio
+async def test_a_trigger_cannot_steal_a_menu_button(clean_templates):
+    """The bot reads a tapped button as its own title, so a trigger that also fires on that title
+    would silently disable the button for every customer."""
+    errs = T.validate_custom(T.CustomReply(key="orders-x", title="Orders", triggers=["order"], texts={"en": "hi"}))
+    assert any("Show my orders" in e or "Order status" in e for e in errs)
+    # a word that is not a button title but is still a built-in keyword ("thanks" ends the chat)
+    assert any("built-in keyword" in e for e in T.validate_custom(T.CustomReply(key="t", title="T", triggers=["thanks"], texts={"en": "x"})))
+    # "menu" is caught as well, by the button check - it is contained in the "Main menu" title
+    assert T.validate_custom(T.CustomReply(key="m", title="M", triggers=["menu"], texts={"en": "x"})) != []
+    assert any("order or item code" in e for e in T.validate_custom(T.CustomReply(key="c", title="C", triggers=["45240"], texts={"en": "x"})))
+    # and a saved reply cannot be shadowed the other way round either
+    await T.save_custom(T.CustomReply(key="gst-test", title="GST", triggers=["gst rate"], texts={"en": "18%"}))
+    assert any("custom reply" in e for e in T.validate_label("another", "en", "GST rate"))
 
 
 # ---------------- API ----------------
@@ -186,10 +202,13 @@ async def test_templates_api_roundtrip(clean_templates):
         assert hist and hist[0]["lang"] == "hi"
         assert (await c.delete("/admin/api/templates/template/result", headers=H)).json()["ok"] is True
         assert not T.registry.is_overridden("template", "result", "hi")
+        # "help" is refused: it is already a built-in keyword for the Contact us button
         r = await c.post("/admin/api/templates/custom", headers=H, json={"key": "help", "title": "Help", "triggers": ["help"], "texts": {"en": "Help text"}, "buttons": ["done"]})
+        assert r.json()["ok"] is False
+        r = await c.post("/admin/api/templates/custom", headers=H, json={"key": "gst", "title": "GST", "triggers": ["gst rate"], "texts": {"en": "18%"}, "buttons": ["done"]})
         assert r.json()["ok"] is True
-        r = await c.post("/admin/api/templates/custom/test", headers=H, json={"text": "HELP!"})
-        assert r.json()["match"]["key"] == "help"
-        assert (await c.delete("/admin/api/templates/custom/help", headers=H)).json()["ok"] is True
-        assert (await c.delete("/admin/api/templates/custom/help", headers=H)).status_code == 404
+        r = await c.post("/admin/api/templates/custom/test", headers=H, json={"text": "GST RATE?"})
+        assert r.json()["match"]["key"] == "gst"
+        assert (await c.delete("/admin/api/templates/custom/gst", headers=H)).json()["ok"] is True
+        assert (await c.delete("/admin/api/templates/custom/gst", headers=H)).status_code == 404
         assert (await c.put("/admin/api/templates/template/nope", headers=H, json={"texts": {"en": "x"}})).status_code == 404

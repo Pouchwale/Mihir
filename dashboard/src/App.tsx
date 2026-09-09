@@ -10,6 +10,7 @@ import Simulator from "./pages/Simulator";
 import Settings from "./pages/Settings";
 import Data from "./pages/Data";
 import Templates from "./pages/Templates";
+import GoLive from "./pages/GoLive";
 
 const NAV = [
   ["/", "Overview"],
@@ -21,6 +22,7 @@ const NAV = [
   ["/imports", "Data sources"],
   ["/data", "Browse data"],
   ["/settings", "Settings"],
+  ["/go-live", "Go live"],
 ] as const;
 
 function Login({ onOk }: { onOk: () => void }) {
@@ -105,6 +107,7 @@ export default function App() {
           <Route path="/imports" element={<Imports />} />
           <Route path="/data" element={<Data />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/go-live" element={<GoLive />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

@@ -59,12 +59,14 @@ def write_customers(path: Path | None = None) -> Path:
     return path
 
 
-def write_orders() -> None:
+def write_orders(out_dir: Path | None = None) -> Path:
+    out = out_dir or FX
+    out.mkdir(parents=True, exist_ok=True)
     rows = [dict(zip(ORDER_HEADERS, r)) for r in ORDERS]
-    (FX / "orders_dummy.json").write_text(json.dumps({"data": rows}, indent=2, ensure_ascii=False), encoding="utf-8")
+    (out / "orders_dummy.json").write_text(json.dumps({"data": rows}, indent=2, ensure_ascii=False), encoding="utf-8")
     # QUOTE_ALL so the deliberate trailing space in "Patel Agro Industries " sits inside quotes and
     # survives editors that strip trailing whitespace on save.
-    with (FX / "orders_dummy.csv").open("w", newline="", encoding="utf-8") as f:
+    with (out / "orders_dummy.csv").open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f, quoting=csv.QUOTE_ALL)
         w.writerow(ORDER_HEADERS)
         w.writerows(ORDERS)
@@ -74,13 +76,14 @@ def write_orders() -> None:
     ws.append(ORDER_HEADERS)
     for r in ORDERS:
         ws.append(list(r))
-    wb.save(FX / "orders_dummy.xlsx")
+    wb.save(out / "orders_dummy.xlsx")
     th = "".join(f"<th>{html.escape(h)}</th>" for h in ORDER_HEADERS)
     trs = "".join("<tr>" + "".join(f"<td>{html.escape(c)}</td>" for c in r) + "</tr>" for r in ORDERS)
-    (FX / "orders_dummy.html").write_text(
+    (out / "orders_dummy.html").write_text(
         f"<!doctype html><html><body><h1>Order Status Report</h1><table border=1><thead><tr>{th}</tr></thead><tbody>{trs}</tbody></table></body></html>",
         encoding="utf-8",
     )
+    return out
 
 
 def write_voice() -> None:

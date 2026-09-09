@@ -60,7 +60,10 @@ def test_flow_map_is_consistent_with_the_templates():
 # ---------------- editable buttons ----------------
 def test_button_validation():
     assert T.validate_buttons("result", ["another", "done"]) == []
-    assert T.validate_buttons("result", []) == []
+    # a message the flow depends on may not be left with no way forward for a tap-only customer
+    assert any("at least one button" in e for e in T.validate_buttons("result", []))
+    assert any("at least one button" in e for e in T.validate_buttons("main_menu", []))
+    assert T.validate_buttons("bye", []) == []  # a dead end on purpose: the window has ended
     assert any("at most 3" in e for e in T.validate_buttons("result", ["another", "done", "my_orders", "menu"]))
     assert any("same button" in e for e in T.validate_buttons("result", ["done", "done"]))
     assert any("unknown button" in e for e in T.validate_buttons("result", ["nope"]))
@@ -82,17 +85,23 @@ async def test_changing_buttons_changes_what_the_customer_gets(clean_templates, 
     r = await _send(SHREE, "Show my orders")
     assert r.outcome == "ask_so"
 
-    # no buttons at all -> plain message
-    assert await T.save_buttons("result", []) == []
+    # 'result' must keep at least one button; the rejected save changes nothing
+    assert await T.save_buttons("result", []) != []
     r = await _send(SHREE, "45231")
-    assert r.options is None
+    assert [i["title"] for i in r.options["items"]] == ["Show my orders"]
+
+    # a slot that may be empty (bye ends the window) does send a plain message
+    assert await T.save_buttons("bye", []) == []
+    r = await _send(SHREE, "done")
+    assert r.outcome == "bye" and r.options is None
 
     # back to the default drops the override row
     assert await T.save_buttons("result", ["another", "menu", "done"]) == []
     assert not T.registry.buttons_overridden("result")
 
-    # the main menu buttons are editable too
+    # the main menu buttons are editable too ("done" above ended the window, so start a new one)
     assert await T.save_buttons("main_menu", ["order_status", "contact_us"]) == []
+    await open_menu(SHREE)
     r = await _send(SHREE, "menu")
     assert [i["title"] for i in r.options["items"]] == ["Order status", "Contact us"]
 

@@ -6,7 +6,7 @@ import json
 import uuid
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +15,7 @@ from ..config import get_settings
 from ..db import get_db
 from ..jobs import customer_sync, order_refresh, queue_worker, scheduler, session_cleanup
 from ..models import Customer, InboundQueue, MessageLog, NameMismatchLog, OrderCache, Session, SyncRun, utcnow
-from ..services import alerts, intent
+from ..services import alerts, intent, preflight
 from ..services.state_machine import reset
 from ..services.wati import wati
 from .health import status_payload
@@ -65,6 +65,13 @@ def _run_dict(r: SyncRun) -> dict:
 
 
 # ---------------- overview ----------------
+@api.get("/readiness")
+async def readiness(request: Request, deep: bool = True):
+    """Everything that must be true before real customers can use the bot, each with the exact fix.
+    deep=false skips the live connection tests (fast enough to poll)."""
+    return await preflight.run_checks(deep=deep, base_url=str(request.base_url))
+
+
 @api.get("/overview")
 async def overview(db: AsyncSession = Depends(get_db)):
     s = get_settings()

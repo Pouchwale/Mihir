@@ -15,10 +15,11 @@ from app.services import crypto
 from app.services import settings_store as store
 
 H = {"X-Admin-Key": "test-admin"}
-from tests.conftest import CUSTOMERS_XLSX as _CX
+from tests.conftest import BACKEND, CUSTOMERS_XLSX as _CX, FIXTURES as _FX
 
-FIXTURES = "fixtures"
-CUSTOMERS_XLSX = _CX.relative_to(_CX.parents[2]).as_posix()  # relative to backend/, like the other fixtures
+# Generated dummy data (tests/_generated), never backend/fixtures - those are the owner's to edit.
+FIXTURES = _FX.relative_to(BACKEND).as_posix()
+CUSTOMERS_XLSX = _CX.relative_to(BACKEND).as_posix()
 
 
 @pytest.fixture
