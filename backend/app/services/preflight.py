@@ -11,6 +11,7 @@ so the page can never disagree with what the bot really does.
 from __future__ import annotations
 
 import asyncio
+import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -161,6 +162,18 @@ def hook_url_for(s, base_url: str = "") -> str:
     return f"{shown}/webhook/wati?token={'<WATI_WEBHOOK_TOKEN>' if weak else s.wati_webhook_token}"
 
 
+def _looks_like_wati_token(value: str) -> bool:
+    """WATI API tokens are JWTs: 'eyJ' then exactly two dots. Shared by the two checks below so they
+    cannot disagree about what one looks like."""
+    return value.startswith("eyJ") and value.count(".") == 2
+
+
+def suggest_webhook_token() -> str:
+    """A webhook secret the owner can use as-is. Fresh every call and unrelated to any other secret
+    in the process - the point is that nobody has to invent one, not that this one is special."""
+    return "wati_hook_" + secrets.token_hex(16)
+
+
 def token_shape_problem(token: str) -> str:
     """Paste mistakes that produce a 401 but are invisible in an editor. Never returns the token."""
     if not token:
@@ -174,7 +187,7 @@ def token_shape_problem(token: str) -> str:
                 "WATI tokens are one long unbroken string; put it on a single line.")
     if body[:1] in ("\"", "'") or body[-1:] in ("\"", "'"):
         return "The token is wrapped in quotes. In .env write it without quotes: WATI_TOKEN=eyJhbGciOi..."
-    if not body.startswith("eyJ") or body.count(".") != 2:
+    if not _looks_like_wati_token(body):
         return ("This does not look like a WATI API token. They start with 'eyJ' and contain exactly two dots. "
                 "Copy the whole value from WATI -> Connector -> API (it is shown only once).")
     return ""
@@ -191,6 +204,11 @@ def webhook_token_problem(token: str) -> str:
                 "webhook again.")
     if token != token.strip() or any(ch.isspace() for ch in token):
         return "The secret has a space or line break in it. Keep it on one line with no spaces."
+    # Before the ?&= branch: a JWT can carry '=' padding, and "that is your API token" is the more
+    # useful answer than "that character belongs to a URL".
+    if _looks_like_wati_token(token):
+        return ("That is your WATI API token, not the webhook secret. The API token belongs in WATI_TOKEN; "
+                "WATI_WEBHOOK_TOKEN is a separate secret that you invent - WATI does not issue it.")
     if "?" in token or "&" in token or "=" in token:
         return "The secret contains ? & or =, which belong to the URL around it, not to the token itself."
     if len(token) > 128:
@@ -199,75 +217,96 @@ def webhook_token_problem(token: str) -> str:
     return ""
 
 
+def _settings_location() -> str:
+    """Where the owner actually changes a setting. On a hosted platform backend/.env is not it: the
+    value lives in the service's own environment, and editing it needs a redeploy to take effect."""
+    platform = ephemeral_host()
+    return f"{platform} -> Environment (redeploy to apply)" if platform else "backend/.env"
+
+
 def _security(s, base_url: str) -> list[Check]:
     out: list[Check] = []
     add = _c(out, "Security")
+    where = _settings_location()
     add("app_mode", "Application mode", "pass" if not s.is_dev else "warn",
         f"APP_MODE={s.app_mode}",
         "Dev mode shows the yellow banner and simulates WhatsApp. Set APP_MODE=prod when you go live." if s.is_dev else "",
-        "backend/.env")
+        where)
     stale = env_changed_since_start()
     add("env_fresh", "Settings file loaded", "fail" if stale else "pass",
         "backend/.env has been edited since the bot started - the bot is still using the OLD values" if stale
         else "the bot is using the current backend/.env",
-        "Press 'Apply .env changes' above (or restart the bot). Editing .env while it runs changes nothing on its "
-        "own: the file is read once at start-up, and auto-reload only watches program files." if stale else "",
+        "Restart the bot so it re-reads the file (on a hosted service, redeploy). Editing .env while it runs "
+        "changes nothing on its own: the file is read once at start-up." if stale else "",
         "backend/.env")
     weak_admin = s.admin_key == INSECURE_DEFAULTS["admin_key"] or len(s.admin_key) < MIN_ADMIN_KEY
     add("admin_key", "Dashboard password", "fail" if weak_admin else "pass",
         "still the example value" if s.admin_key == INSECURE_DEFAULTS["admin_key"] else f"{len(s.admin_key)} characters",
         f"Set ADMIN_KEY to a long random value (at least {MIN_ADMIN_KEY} characters)." if weak_admin else "",
-        "backend/.env")
+        where)
     weak_hook = s.wati_webhook_token == INSECURE_DEFAULTS["wati_webhook_token"] or len(s.wati_webhook_token) < MIN_WEBHOOK_TOKEN
     host_problem = _public_host_problem(public_base(s, base_url))
     hook_url = hook_url_for(s, base_url)
     shape = webhook_token_problem(s.wati_webhook_token)
+    # Whatever the specific mistake, always say who issues this value and hand over a usable one.
+    # Naming only the mistake sends people into the WATI portal looking for a value it never had.
+    hook_fix = ""
+    if weak_hook or shape:
+        # the shape message sometimes says this already - do not say it twice
+        owner = ("" if "you invent" in shape else
+                 "WATI_WEBHOOK_TOKEN is a secret you invent - WATI does not issue it, so there is nothing to look up.")
+        hook_fix = "\n".join(filter(None, [
+            shape,
+            owner,
+            "Use this value, or any 32 to 64 random characters of your own:",
+            f"  {suggest_webhook_token()}",
+            "Changing it changes the webhook address, so register the webhook again afterwards.",
+        ]))
     add("webhook_token", "Webhook token", "fail" if (weak_hook or shape) else "pass",
         "still the example value" if s.wati_webhook_token == INSECURE_DEFAULTS["wati_webhook_token"]
         else (shape[:90] if shape else f"{len(s.wati_webhook_token)} characters"),
-        shape or ((f"Set WATI_WEBHOOK_TOKEN to a long random value (at least {MIN_WEBHOOK_TOKEN} characters). "
-                   "It is a secret you invent - WATI does not give you this one.") if weak_hook else ""),
-        "backend/.env")
+        hook_fix, where)
     add("webhook_url", "Webhook address WATI will call", "fail" if host_problem else "pass",
         hook_url,
         host_problem or "Paste this exact address into WATI -> Settings -> Webhooks for the event 'Message received'.",
         "the WATI portal")
     if host_problem and not s.public_base_url:
         add("public_base_url", "Public address", "fail", "not configured, and this request came from a private address",
-            "Set PUBLIC_BASE_URL in backend/.env to the https address customers' messages arrive on, e.g. "
+            "Set PUBLIC_BASE_URL to the https address customers' messages arrive on, e.g. "
             "https://bot.yourdomain.com. Behind a reverse proxy or tunnel the server cannot work this out by itself.",
-            "backend/.env")
+            where)
     platform = ephemeral_host()
     if not s.secret_key and platform:
         add("secret_key", "Password encryption key", "fail", f"auto-generated file, on {platform}",
             f"{platform} regenerates this file on every deploy, so any connection password saved in the dashboard "
             "becomes unreadable and silently stops working. Set SECRET_KEY to a long random value in the "
-            "environment - any phrase will do, it just has to stay the same.", "backend/.env")
+            "environment - any phrase will do, it just has to stay the same.", where)
     else:
         add("secret_key", "Password encryption key", "pass" if s.secret_key else "warn",
             "SECRET_KEY set" if s.secret_key else "auto-generated file backend/.secret_key",
             "" if s.secret_key else "Fine for one server that keeps its disk. Back up backend/.secret_key, or set "
                                     "SECRET_KEY - without it, connection passwords saved in the dashboard must be "
-                                    "typed in again.", "backend/.env")
+                                    "typed in again.", where)
     return out
 
 
 def _whatsapp(s, wati_status: dict | None, hooks=NOT_CHECKED, expected_url: str = "", health: dict | None = None) -> list[Check]:
     out: list[Check] = []
     add = _c(out, "WhatsApp (WATI)")
+    where = _settings_location()
     add("wati_token", "WATI token", "pass" if s.wati_token else "fail",
         "set" if s.wati_token else "empty - nothing is sent to WhatsApp",
         "" if s.wati_token else "In WATI go to Connector -> API -> Create API Token (or Settings -> API Docs on older accounts), generate a token with the message and contact scopes, and put it in WATI_TOKEN. It is shown only once.",
-        "backend/.env")
+        where)
     shape = token_shape_problem(s.wati_token)
     if s.wati_token:
         add("wati_token_format", "Token format", "fail" if shape else "pass",
-            shape or "looks like a WATI token", shape, "backend/.env")
+            shape or "looks like a WATI token", shape, where)
     add("wati_base_url", "WATI tenant URL", "pass" if s.wati_base_url_ok else "fail",
         s.wati_base_url,
         "" if s.wati_base_url_ok else "WATI_BASE_URL must end with your own tenant id, e.g. "
                                       "https://live-mt-server.wati.io/123456 (copy it from WATI -> Settings -> API Docs).",
-        "backend/.env")
+        where)
     if wati_status is not None:
         ok = bool(wati_status.get("connected"))
         scope_warning = wati_status.get("scope_warning") or ""
@@ -278,13 +317,13 @@ def _whatsapp(s, wati_status: dict | None, hooks=NOT_CHECKED, expected_url: str 
             status, fix = "pass", ""
         else:
             status, fix = "fail", "Fix the token / tenant URL above, then press 'Run the checks again'."
-        add("wati_connection", "WATI connection", status, wati_status.get("detail", ""), fix, "backend/.env")
+        add("wati_connection", "WATI connection", status, wati_status.get("detail", ""), fix, where)
     if hooks is not NOT_CHECKED:
         # Without this, outgoing messages work but the bot never HEARS a customer - the single most
         # confusing way for a WhatsApp bot to look broken.
         if isinstance(hooks, Exception):
             add("webhook_registered", "Webhook registered in WATI", "warn", f"could not ask WATI: {hooks}",
-                "Fix the token first, then run the checks again.", "backend/.env")
+                "Fix the token first, then run the checks again.", where)
         elif hooks is None:
             # WATI documents creating webhooks but not listing them, so on some accounts we simply
             # cannot check. Never fail for something we are unable to see.
@@ -333,7 +372,7 @@ def _whatsapp(s, wati_status: dict | None, hooks=NOT_CHECKED, expected_url: str 
     add("support_contact", "Support contact", "fail" if bad_support else "pass",
         s.support_contact,
         "Customers are told to contact this. Set SUPPORT_CONTACT to your real number or email." if bad_support else "",
-        "backend/.env")
+        where)
     return out
 
 

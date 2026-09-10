@@ -52,7 +52,7 @@ def explain(status: int | None, body: str) -> str:
             "password was changed (which invalidates existing tokens). Note WATI also ran a security key rotation "
             "completed in February 2026 - tokens that made no API call during it were expired and must be replaced. "
             "Fix: in WATI go to Connector -> API -> Create API Token, generate a new token with the message and "
-            "contact scopes, put it in WATI_TOKEN, and restart (or press 'Apply .env changes')."
+            "contact scopes, put it in WATI_TOKEN, and restart the bot."
         )
     if status == 404:
         return ("WATI has no such endpoint. WATI_BASE_URL must end with your own tenant id, "

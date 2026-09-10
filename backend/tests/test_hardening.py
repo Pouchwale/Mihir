@@ -144,7 +144,8 @@ async def test_the_readiness_page_says_to_restart_when_env_is_stale(monkeypatch)
     check = next(c for c in r["checks"] if c["key"] == "env_fresh")
     if config.ENV_FILE.exists():  # only meaningful when there is a .env to compare against
         assert check["status"] == "fail"
-        assert "OLD values" in check["detail"] and "Apply" in check["fix"]
+        # the fix must name something that still exists - there is no "Apply .env changes" button now
+        assert "OLD values" in check["detail"] and "Restart" in check["fix"]
 
 
 @pytest.mark.asyncio
@@ -703,6 +704,9 @@ async def test_sqlite_on_an_ephemeral_host_is_a_failure_not_a_note(monkeypatch):
     ("secret with spaces", True, "space or line break"),
     ("abc=def&ghi", True, "? & or ="),
     ("y" * 200, True, "characters long"),
+    # the WATI API token in the wrong box - what actually happened, and the reason the owner went
+    # looking in the WATI portal for a value WATI never issues
+    ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." + "a" * 140 + ".sIg" + "n" * 20, True, "API token"),
 ])
 def test_a_webhook_url_pasted_into_the_token_is_caught(token, broken, hint):
     """Pasting the whole address into WATI_WEBHOOK_TOKEN builds
@@ -729,6 +733,52 @@ async def test_a_broken_webhook_secret_is_never_pasted_into_the_address(monkeypa
     r = await preflight.run_checks(deep=False, base_url="https://bot.example.com/")
     check = next(c for c in r["checks"] if c["key"] == "webhook_token")
     assert check["status"] == "fail" and "whole webhook address" in check["fix"]
+
+
+def test_the_suggested_secret_passes_the_check_that_offered_it():
+    """Offering a value the very next check rejects would be worse than offering nothing."""
+    from app.services.preflight import MIN_WEBHOOK_TOKEN, suggest_webhook_token, webhook_token_problem
+
+    value = suggest_webhook_token()
+    assert webhook_token_problem(value) == ""
+    assert MIN_WEBHOOK_TOKEN <= len(value) <= 128
+    assert value != suggest_webhook_token()  # not derived, not cached
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token", [
+    "change-me-webhook-token",                                   # still the example
+    "short",                                                     # too short
+    "https://bot.example.com/webhook/wati?token=abc",            # the whole address
+    "eyJhbGciOiJIUzI1NiJ9." + "a" * 140 + ".sig",                # the WATI API token
+])
+async def test_every_webhook_secret_problem_says_who_issues_it(monkeypatch, token):
+    """The regression that caused a support detour: naming only the mistake ("170 characters long")
+    sent the owner into the WATI portal to look for a value WATI never had. Whatever is wrong, the
+    fix must say the secret is theirs to invent, and hand them one."""
+    monkeypatch.setattr(get_settings(), "public_base_url", "https://bot.example.com")
+    monkeypatch.setattr(get_settings(), "wati_webhook_token", token)
+    r = await preflight.run_checks(deep=False, base_url="https://bot.example.com/")
+    fix = next(c for c in r["checks"] if c["key"] == "webhook_token")["fix"]
+    assert "you invent" in fix and "does not issue it" in fix
+    assert "wati_hook_" in fix                       # a value to copy, not just advice
+    assert "register the webhook again" in fix       # the secret lives inside the registered URL
+    assert token not in fix                          # never echo what they pasted
+
+
+@pytest.mark.asyncio
+async def test_the_fix_points_at_the_hosting_dashboard_not_a_file(monkeypatch):
+    """On Render backend/.env is not where a setting is changed, and an edit needs a redeploy."""
+    monkeypatch.setattr(get_settings(), "wati_webhook_token", "short")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.delenv("RENDER_SERVICE_ID", raising=False)
+    r = await preflight.run_checks(deep=False, base_url="https://bot.example.com/")
+    assert next(c for c in r["checks"] if c["key"] == "webhook_token")["where"] == "backend/.env"
+
+    monkeypatch.setenv("RENDER", "true")
+    r = await preflight.run_checks(deep=False, base_url="https://bot.example.com/")
+    where = next(c for c in r["checks"] if c["key"] == "webhook_token")["where"]
+    assert "Render" in where and "redeploy" in where
 
 
 # ---------------- the deployment blueprint must match the code ----------------

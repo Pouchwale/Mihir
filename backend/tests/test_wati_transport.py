@@ -19,6 +19,7 @@ from app.jobs import queue_worker
 from app.main import app
 from app.models import MessageLog
 from app.services import rate_limit
+from app.services.processor import extract_message
 from app.services.wati import WatiError, WatiRejected, wati
 from tests.flow import MEHTA, SHREE, run_full_conversation
 
@@ -473,3 +474,86 @@ async def test_registering_uses_the_public_address_not_the_proxied_request(live_
                              json={"phone_number": "919999999999"}, headers={"X-Admin-Key": "test-admin"})
     assert r.status_code == 200, r.text
     assert json.loads(create.calls.last.request.content)[0]["url"].startswith("https://bot.example.com/")
+
+
+# ---------------- the events WATI actually sends ----------------
+# Event names, eventType values and payload field names below are WATI's own, from
+# docs.wati.io/reference ("Webhook Events" -> Message Received / New Contact Message / CTA URL
+# Clicked). Nothing here is invented: a field this project made up would pass its own tests and fail
+# against WATI.
+@pytest.mark.asyncio
+async def test_watis_own_test_button_is_answered_200(clean_sessions):
+    """The exact body WATI's "Test your webhook URL" sends for Session Message Sent - placeholder
+    strings and all. It must be answered 200 and ignored: a non-200 here counts towards WATI
+    disabling the webhook, and treating it as a customer would make the bot reply to itself."""
+    rate_limit.reset_webhook_limit()
+    payload = {
+        "eventType": "sessionMessageSent", "id": "message.Id", "whatsappMessageId": "message.WhatsappMessageId",
+        "conversationId": "message.ConversationId", "ticketId": "message.TicketId", "text": "message.Text",
+        "type": "message.Type", "data": None, "timestamp": "message.Time", "owner": True,
+        "statusString": "message.Status", "assigneeId": "message.AssignedId", "operatorEmail": "operatorEmail",
+        "operatorName": "message.OperatorName", "waId": "waId", "replyContextId": None,
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(HOOK, json=payload)
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "status": "ignored", "reason": "not a customer message"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,reply", [
+    # WATI documents three separate fields for a tap, depending on how the message was sent
+    ("buttonReply", {"id": "btn-1", "title": "Order status"}),
+    ("interactiveButtonReply", {"id": "btn-1", "title": "Order status"}),
+    ("listReply", {"id": "row-1", "title": "Order status", "description": "Check an order"}),
+])
+async def test_a_tapped_button_or_list_row_arrives_as_its_title(clean_sessions, field, reply):
+    """The customer never types in the normal flow - they tap. If any one of these three fields is
+    not read, the whole conversation dies at the first menu with 'I did not understand'."""
+    rate_limit.reset_webhook_limit()
+    payload = {"id": uuid.uuid4().hex, "waId": SHREE, "type": "interactive", "text": None,
+               "eventType": "message", "owner": False, field: reply}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.post(HOOK, json=payload)).json()["status"] == "queued"
+    phone, msg_type, text, _ = extract_message(payload)
+    assert phone == SHREE and text == "Order status" and msg_type == "interactive"
+
+
+@pytest.mark.asyncio
+async def test_a_first_time_customer_is_not_ignored(clean_sessions):
+    """A number WATI has never seen can arrive as newContactMessageReceived rather than message -
+    and that first hello is the entire point of the greeting. Ignoring it would make the bot look
+    dead to exactly the people meeting it for the first time."""
+    rate_limit.reset_webhook_limit()
+    payload = {"id": uuid.uuid4().hex, "waId": SHREE, "type": "text", "text": "hi",
+               "eventType": "newContactMessageReceived", "owner": False}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.post(HOOK, json=payload)).json()["status"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_the_same_message_under_two_event_names_is_handled_once(clean_sessions):
+    """Ticking both Message received and New contact message is safe advice only if a message that
+    arrives under both is answered once. WATI keeps the id, so dedup catches it."""
+    rate_limit.reset_webhook_limit()
+    mid = f"wamid-{uuid.uuid4().hex}"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        first = await c.post(HOOK, json={"id": mid, "waId": SHREE, "type": "text", "text": "hi",
+                                         "eventType": "newContactMessageReceived", "owner": False})
+        second = await c.post(HOOK, json={"id": mid, "waId": SHREE, "type": "text", "text": "hi",
+                                          "eventType": "message", "owner": False})
+    assert first.json()["status"] == "queued"
+    assert second.json()["status"] == "duplicate"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event", ["ctaUrlClicked", "sessionMessageSent", "templateMessageSent",
+                                   "sentMessageDELIVERED", "sentMessageREAD", "sentMessageREPLIED"])
+async def test_the_events_we_tell_people_to_leave_off_are_harmless_if_ticked(clean_sessions, event):
+    """The Go live page says ticking extra events is harmless. That has to be true, including for
+    ctaUrlClicked, which carries no customer message at all."""
+    rate_limit.reset_webhook_limit()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(HOOK, json={"id": uuid.uuid4().hex, "waId": SHREE, "type": "template",
+                                     "text": "hi", "eventType": event, "owner": True})
+    assert r.status_code == 200 and r.json()["status"] == "ignored"

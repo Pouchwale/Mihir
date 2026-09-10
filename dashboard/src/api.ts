@@ -64,8 +64,6 @@ export const api = {
     req<SimResult>("/simulate", { method: "POST", body: JSON.stringify({ phone, text, type, selection }) }),
   // go-live readiness
   readiness: (deep = true) => req<Readiness>(`/readiness?deep=${deep}`),
-  reloadSettings: () => req<{ ok: boolean; wati_mocked: boolean; mode: string; readiness: Readiness }>("/settings/reload", { method: "POST" }),
-  registerWebhook: (phone_number = "") => req<{ ok: boolean; url?: string; detail: string }>("/wati/register-webhook", { method: "POST", body: JSON.stringify({ phone_number }) }),
   diagnostics: () => req<Diagnostics>("/diagnostics"),
   webhookSelfTest: () => req<{ ok: boolean; url: string; status?: number; detail: string }>("/wati/self-test", { method: "POST" }),
   watiWebhooks: () => req<{ ok: boolean; detail?: string; webhooks: Record<string, unknown>[] }>("/wati/webhooks"),
