@@ -176,8 +176,17 @@ with the columns seen, the rows skipped and the reason.
 **Dashboard → Go live** is the checklist. It tests the WATI connection, both data sources, the security
 settings and the server, and prints the exact fix for anything that is not ready.
 
-1. **Server** — any Windows or Linux host reachable over HTTPS (WATI will not call plain HTTP and cannot
-   reach a private address). Install Python 3.12 and MySQL 8, then:
+1. **Server** — any host reachable over HTTPS (WATI will not call plain HTTP and cannot reach a private
+   address). PostgreSQL, MySQL and SQLite are all supported; paste the connection string your host
+   gives you into `DATABASE_URL` and the async driver and TLS settings are applied for you.
+
+   **On Render, Heroku, Cloud Run and similar the filesystem is wiped on every deploy.** SQLite there
+   loses your customers, sessions, chat log and your edited messages each time you deploy, and the
+   generated `backend/.secret_key` is recreated so saved connection passwords stop working. Use the
+   host's managed PostgreSQL and set `SECRET_KEY` explicitly. The Go live page reports both as
+   failures when it detects such a host.
+
+   Self-hosting on MySQL instead:
    ```sql
    CREATE DATABASE order_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
    ```

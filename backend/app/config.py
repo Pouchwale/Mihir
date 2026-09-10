@@ -120,6 +120,32 @@ class Settings(BaseSettings):
     # Alerts
     alert_slack_webhook: str = ""
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _async_driver(cls, v):
+        """Accept the URL a host gives you and make it work.
+
+        Managed Postgres (Render, Heroku, Supabase) hands out `postgres://` or `postgresql://`, which
+        SQLAlchemy would open with a blocking driver - this app is async, so it needs
+        `postgresql+asyncpg://`. `sslmode=` is psycopg syntax that asyncpg rejects outright, so it is
+        stripped here and turned into a connect argument in db.py."""
+        if not isinstance(v, str) or not v.strip():
+            return v
+        url = v.strip()
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                url = "postgresql+asyncpg://" + url[len(prefix):]
+                break
+        if url.startswith("mysql://"):
+            url = "mysql+aiomysql://" + url[len("mysql://"):]
+        if url.startswith("sqlite://") and "+aiosqlite" not in url:
+            url = url.replace("sqlite://", "sqlite+aiosqlite://", 1)
+        if "asyncpg" in url and "sslmode" in url:
+            head, _, query = url.partition("?")
+            keep = [kv for kv in query.split("&") if not kv.lower().startswith(("sslmode=", "channel_binding="))]
+            url = head + ("?" + "&".join(keep) if keep else "")
+        return url
+
     @field_validator("wati_dry_run", mode="before")
     @classmethod
     def _empty_bool(cls, v):
@@ -169,6 +195,19 @@ class Settings(BaseSettings):
             return self.wati_dry_run
         # A token with a placeholder base URL would 404 on every send; mock instead of failing silently.
         return not (self.wati_token and self.wati_base_url_ok)
+
+    @property
+    def is_postgres(self) -> bool:
+        return self.database_url.startswith("postgresql")
+
+    @property
+    def db_needs_ssl(self) -> bool:
+        """Render's *external* Postgres address requires TLS; the internal one does not. The internal
+        host has no dots in it, which is the simplest reliable signal."""
+        if not self.is_postgres:
+            return False
+        host = urlsplit(self.database_url).hostname or ""
+        return "." in host and "localhost" not in host
 
     @property
     def dropbox_configured(self) -> bool:

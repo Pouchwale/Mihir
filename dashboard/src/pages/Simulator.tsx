@@ -9,6 +9,10 @@ const QUICK = ["hi", "English", "हिंदी", "ગુજરાતી", "ord
 
 export default function Simulator() {
   const customers = usePoll(() => api.customers(), 0);
+  // Whether a message really leaves this server depends on the WATI token, NOT on dev/prod - so ask.
+  const overview = usePoll(() => api.overview(), 0);
+  const live = overview.data ? !overview.data.health.wati_mocked : null;
+  const [acknowledged, setAcknowledged] = useState<string | null>(null);
   const [phone, setPhone] = useState("");
   const [text, setText] = useState("");
   const [log, setLog] = useState<Bubble[]>([]);
@@ -24,6 +28,13 @@ export default function Simulator() {
 
   const send = async (t: string, type: "text" | "audio" = "text", selection?: Selection) => {
     if (!phone) return;
+    if (live && acknowledged !== phone) {
+      const who = cust ? `${cust.name} (${phone})` : phone;
+      if (!confirm(`WATI is live. This will send a real WhatsApp message to ${who}.
+
+Continue?`)) return;
+      setAcknowledged(phone);
+    }
     setBusy(true);
     setErr(null);
     setLog((l) => [...l, { dir: "in", text: type === "audio" ? "🎤 (voice note)" : t, tapped: !!selection }]);
@@ -55,8 +66,23 @@ export default function Simulator() {
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-semibold">Conversation simulator</h1>
-        <p className="text-sm text-slate-500">Sends a WATI-shaped webhook through the real pipeline (token → dedup → queue → processor). Tap the blue options exactly like a customer would on WhatsApp, or type. WATI is mocked in dev, so nothing reaches WhatsApp.</p>
+        <p className="text-sm text-slate-500">
+          Sends a WATI-shaped webhook through the real pipeline (token → dedup → queue → processor). Tap the blue
+          options exactly like a customer would on WhatsApp, or type.
+        </p>
       </div>
+      {live === false && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          WATI has no token, so nothing leaves this server — every reply below is simulated.
+        </div>
+      )}
+      {live === true && (
+        <div className="rounded-lg border-2 border-rose-400 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+          <b>WATI is LIVE.</b> Every reply below is really delivered on WhatsApp to the number selected on the left.
+          Use your own number, not a customer's.
+        </div>
+      )}
+
       <ErrorBox msg={err} />
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="card space-y-3">

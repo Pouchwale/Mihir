@@ -83,6 +83,22 @@ def _c(checks: list[Check], group: str):
     return add
 
 
+def ephemeral_host() -> str:
+    """The name of the platform when this runs on a container with a throwaway filesystem.
+
+    On these, anything written to disk - the SQLite file, the generated .secret_key - is gone at the
+    next deploy, so advice that is fine on a normal server is actively wrong here."""
+    import os
+
+    if os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"):
+        return "Render"
+    if os.environ.get("DYNO"):
+        return "Heroku"
+    if os.environ.get("K_SERVICE"):
+        return "Cloud Run"
+    return ""
+
+
 def _public_host_problem(base_url: str) -> str:
     """WATI calls the webhook from the internet. Say plainly when this address cannot work."""
     if not base_url:
@@ -112,7 +128,9 @@ def public_base(s, base_url: str = "") -> str:
 
 def hook_url_for(s, base_url: str = "") -> str:
     """The exact address WATI must call. '<your-domain>' when this server is not publicly reachable."""
-    weak = s.wati_webhook_token == INSECURE_DEFAULTS["wati_webhook_token"] or len(s.wati_webhook_token) < MIN_WEBHOOK_TOKEN
+    weak = (s.wati_webhook_token == INSECURE_DEFAULTS["wati_webhook_token"]
+            or len(s.wati_webhook_token) < MIN_WEBHOOK_TOKEN
+            or bool(webhook_token_problem(s.wati_webhook_token)))
     base = public_base(s, base_url)
     shown = base if (base and not _public_host_problem(base)) else "https://<your-domain>"
     return f"{shown}/webhook/wati?token={'<WATI_WEBHOOK_TOKEN>' if weak else s.wati_webhook_token}"
@@ -134,6 +152,25 @@ def token_shape_problem(token: str) -> str:
     if not body.startswith("eyJ") or body.count(".") != 2:
         return ("This does not look like a WATI API token. They start with 'eyJ' and contain exactly two dots. "
                 "Copy the whole value from WATI -> Connector -> API (it is shown only once).")
+    return ""
+
+
+def webhook_token_problem(token: str) -> str:
+    """Paste mistakes in the webhook secret. The commonest is pasting the whole webhook URL, which
+    produces `...?token=https://.../webhook/wati?token=xxx` and can never match what WATI sends."""
+    if not token or token == INSECURE_DEFAULTS["wati_webhook_token"]:
+        return ""
+    if "://" in token or "/webhook/wati" in token:
+        return ("This is the whole webhook address, not the secret. WATI_WEBHOOK_TOKEN must be ONLY the value after "
+                "'token=' - the app builds the full address around it. Set it to just the secret and register the "
+                "webhook again.")
+    if token != token.strip() or any(ch.isspace() for ch in token):
+        return "The secret has a space or line break in it. Keep it on one line with no spaces."
+    if "?" in token or "&" in token or "=" in token:
+        return "The secret contains ? & or =, which belong to the URL around it, not to the token itself."
+    if len(token) > 128:
+        return (f"This is {len(token)} characters long. A webhook secret only needs to be unguessable - 32 to 64 "
+                "characters is plenty, and a very long one is usually a URL or a token pasted twice.")
     return ""
 
 
@@ -159,10 +196,12 @@ def _security(s, base_url: str) -> list[Check]:
     weak_hook = s.wati_webhook_token == INSECURE_DEFAULTS["wati_webhook_token"] or len(s.wati_webhook_token) < MIN_WEBHOOK_TOKEN
     host_problem = _public_host_problem(public_base(s, base_url))
     hook_url = hook_url_for(s, base_url)
-    add("webhook_token", "Webhook token", "fail" if weak_hook else "pass",
-        "still the example value" if s.wati_webhook_token == INSECURE_DEFAULTS["wati_webhook_token"] else f"{len(s.wati_webhook_token)} characters",
-        (f"Set WATI_WEBHOOK_TOKEN to a long random value (at least {MIN_WEBHOOK_TOKEN} characters). "
-         f"It is a secret you invent - WATI does not give you this one.") if weak_hook else "",
+    shape = webhook_token_problem(s.wati_webhook_token)
+    add("webhook_token", "Webhook token", "fail" if (weak_hook or shape) else "pass",
+        "still the example value" if s.wati_webhook_token == INSECURE_DEFAULTS["wati_webhook_token"]
+        else (shape[:90] if shape else f"{len(s.wati_webhook_token)} characters"),
+        shape or ((f"Set WATI_WEBHOOK_TOKEN to a long random value (at least {MIN_WEBHOOK_TOKEN} characters). "
+                   "It is a secret you invent - WATI does not give you this one.") if weak_hook else ""),
         "backend/.env")
     add("webhook_url", "Webhook address WATI will call", "fail" if host_problem else "pass",
         hook_url,
@@ -173,11 +212,18 @@ def _security(s, base_url: str) -> list[Check]:
             "Set PUBLIC_BASE_URL in backend/.env to the https address customers' messages arrive on, e.g. "
             "https://bot.yourdomain.com. Behind a reverse proxy or tunnel the server cannot work this out by itself.",
             "backend/.env")
-    add("secret_key", "Password encryption key", "pass" if s.secret_key else "warn",
-        "SECRET_KEY set in .env" if s.secret_key else "auto-generated file backend/.secret_key",
-        "" if s.secret_key else "Fine for one server. Back up backend/.secret_key, or set SECRET_KEY in .env - "
-                                "without it, the connection passwords saved in the dashboard must be typed in again.",
-        "backend/.env")
+    platform = ephemeral_host()
+    if not s.secret_key and platform:
+        add("secret_key", "Password encryption key", "fail", f"auto-generated file, on {platform}",
+            f"{platform} regenerates this file on every deploy, so any connection password saved in the dashboard "
+            "becomes unreadable and silently stops working. Set SECRET_KEY to a long random value in the "
+            "environment - any phrase will do, it just has to stay the same.", "backend/.env")
+    else:
+        add("secret_key", "Password encryption key", "pass" if s.secret_key else "warn",
+            "SECRET_KEY set" if s.secret_key else "auto-generated file backend/.secret_key",
+            "" if s.secret_key else "Fine for one server that keeps its disk. Back up backend/.secret_key, or set "
+                                    "SECRET_KEY - without it, connection passwords saved in the dashboard must be "
+                                    "typed in again.", "backend/.env")
     return out
 
 
@@ -305,10 +351,19 @@ def _runtime(s, sqlite: bool, jobs: list[dict], queued: int, failed: int, ai_pau
              running_server: bool = True) -> list[Check]:
     out: list[Check] = []
     add = _c(out, "Server")
-    add("database", "Database", "warn" if sqlite else "pass",
-        "SQLite file" if sqlite else "MySQL",
-        "SQLite is fine for one server. Back it up with scripts/backup_db.ps1, or move to MySQL for production." if sqlite else "",
-        "backend/.env (DATABASE_URL)")
+    platform = ephemeral_host()
+    if sqlite and platform:
+        add("database", "Database", "fail", f"SQLite file on {platform}",
+            f"{platform} gives each deploy a fresh filesystem, so this database - your customers, sessions, chat "
+            "log AND your edited messages - is deleted every time you deploy or the service restarts. Create a "
+            f"{platform} Postgres and set DATABASE_URL to its Internal Database URL. The app accepts the URL exactly "
+            "as given.", "backend/.env (DATABASE_URL)")
+    else:
+        add("database", "Database", "warn" if sqlite else "pass",
+            "SQLite file" if sqlite else ("PostgreSQL" if s.is_postgres else "MySQL"),
+            "SQLite is fine for a single server that keeps its disk. Back it up with scripts/backup_db.ps1, or move "
+            "to PostgreSQL or MySQL for production." if sqlite else "",
+            "backend/.env (DATABASE_URL)")
     names = {j["id"] for j in jobs if j.get("next_run")}
     missing = [j for j in ("customer_sync", "order_refresh") if j not in names]
     if not running_server:

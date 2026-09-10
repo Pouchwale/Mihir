@@ -27,6 +27,10 @@ def get_engine():
             kwargs = {"connect_args": {"timeout": 30}}
         else:
             kwargs.update({"pool_recycle": 1800, "pool_size": 5, "max_overflow": 10})
+            if s.db_needs_ssl:
+                # A managed Postgres reached over the public internet requires TLS. asyncpg takes it
+                # as a connect argument, not the `sslmode=` query parameter psycopg uses.
+                kwargs["connect_args"] = {"ssl": True}
         _engine = create_async_engine(s.database_url, **kwargs)
     return _engine
 
@@ -58,6 +62,18 @@ async def get_db() -> AsyncIterator[AsyncSession]:
 
 def is_sqlite() -> bool:
     return get_settings().database_url.startswith("sqlite")
+
+
+def day_of(column):
+    """Group a timestamp by calendar day, on every database we support.
+
+    SQLite and MySQL have DATE(x). PostgreSQL does not, and needs a cast - but casting on SQLite
+    applies NUMERIC affinity and mangles the timestamp, so this cannot be one expression."""
+    from sqlalchemy import Date, cast, func
+
+    if get_settings().is_postgres:
+        return cast(column, Date)
+    return func.date(column)
 
 
 async def init_db() -> None:

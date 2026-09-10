@@ -12,7 +12,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
-from ..db import get_db
+from ..db import day_of, get_db
 from ..jobs import customer_sync, order_refresh, queue_worker, scheduler, session_cleanup
 from ..models import Customer, InboundQueue, MessageLog, NameMismatchLog, OrderCache, Session, SyncRun, WebhookLog, utcnow
 import structlog
@@ -218,7 +218,7 @@ async def overview(db: AsyncSession = Depends(get_db)):
     queued = await db.scalar(select(func.count(InboundQueue.id)).where(InboundQueue.status.in_(["queued", "processing"])))
     failed_q = await db.scalar(select(func.count(InboundQueue.id)).where(InboundQueue.status == "failed"))
 
-    day = func.date(MessageLog.created_at)
+    day = day_of(MessageLog.created_at)
     rows = (await db.execute(select(day, MessageLog.direction, func.count(MessageLog.id)).where(MessageLog.created_at >= since).group_by(day, MessageLog.direction).order_by(day))).all()
     per_day: dict[str, dict] = {}
     for d, direction, n in rows:
@@ -278,9 +278,9 @@ async def list_messages(db: AsyncSession = Depends(get_db), phone: str | None = 
     cnt = select(func.count(MessageLog.id))
     conds = []
     if phone:
-        conds.append(MessageLog.phone_e164.like(f"%{phone}%"))
+        conds.append(MessageLog.phone_e164.ilike(f"%{phone}%"))
     if q:
-        conds.append((MessageLog.text.like(f"%{q}%")) | (MessageLog.transcript.like(f"%{q}%")))
+        conds.append((MessageLog.text.ilike(f"%{q}%")) | (MessageLog.transcript.ilike(f"%{q}%")))
     if direction in ("in", "out"):
         conds.append(MessageLog.direction == direction)
     if outcome:
@@ -352,7 +352,7 @@ async def queue_status(db: AsyncSession = Depends(get_db), limit: int = 50):
 async def list_customers(db: AsyncSession = Depends(get_db), q: str | None = None, limit: int = 500):
     stmt = select(Customer).order_by(Customer.customer_name).limit(limit)
     if q:
-        stmt = stmt.where((Customer.customer_name.like(f"%{q}%")) | (Customer.phone_e164.like(f"%{q}%")) | (Customer.customer_code.like(f"%{q}%")))
+        stmt = stmt.where((Customer.customer_name.ilike(f"%{q}%")) | (Customer.phone_e164.ilike(f"%{q}%")) | (Customer.customer_code.ilike(f"%{q}%")))
     rows = (await db.execute(stmt)).scalars().all()
     so_by_name: dict[str, set[str]] = {}
     for so, name in (await db.execute(select(OrderCache.so_no, OrderCache.customer_name))).all():
@@ -365,7 +365,7 @@ async def list_customers(db: AsyncSession = Depends(get_db), q: str | None = Non
 async def list_orders(db: AsyncSession = Depends(get_db), q: str | None = None, limit: int = 500):
     stmt = select(OrderCache).order_by(OrderCache.so_no, OrderCache.fg_item_code).limit(limit)
     if q:
-        stmt = stmt.where((OrderCache.so_no.like(f"%{q}%")) | (OrderCache.po_no.like(f"%{q}%")) | (OrderCache.customer_name.like(f"%{q}%")) | (OrderCache.fg_item_code.like(f"%{q}%")))
+        stmt = stmt.where((OrderCache.so_no.ilike(f"%{q}%")) | (OrderCache.po_no.ilike(f"%{q}%")) | (OrderCache.customer_name.ilike(f"%{q}%")) | (OrderCache.fg_item_code.ilike(f"%{q}%")))
     rows = (await db.execute(stmt)).scalars().all()
     return [{"id": r.id, "so_no": r.so_no, "po_no": r.po_no, "fg_item_code": r.fg_item_code, "customer_name": r.customer_name,
              "connection_status": r.connection_status, "real_status": r.real_status, "fetched_at": _dt(r.fetched_at)} for r in rows]

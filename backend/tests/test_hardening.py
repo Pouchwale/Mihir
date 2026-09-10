@@ -592,9 +592,11 @@ def test_no_tracked_file_leaks_a_secret_or_personal_data():
                       for c in __import__("scripts.make_fixtures", fromlist=["CUSTOMERS"]).CUSTOMERS}
     allowed = {n for n in sample_numbers} | {n[2:] for n in sample_numbers if n.startswith("91")}
     offenders: list[str] = []
+    this_file = pathlib.Path(__file__).resolve().relative_to(root).as_posix()
     for rel in files:
         path = root / rel
-        if path.suffix.lower() in {".png", ".jpg", ".ico", ".xlsx", ".lock"} or not path.exists():
+        # this file necessarily contains the patterns it searches for
+        if rel == this_file or path.suffix.lower() in {".png", ".jpg", ".ico", ".xlsx", ".lock"} or not path.exists():
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
@@ -605,8 +607,12 @@ def test_no_tracked_file_leaks_a_secret_or_personal_data():
         if "GP3" in text and rel != "backend/tests/test_hardening.py":
             offenders.append(f"{rel}: contains a developer machine path")
         for num in re.findall(r"\b91[6-9]\d{9}\b", text):
-            if num not in allowed and num[2:] not in allowed:
-                offenders.append(f"{rel}: phone number {num[:4]}... is not sample data")
+            subscriber = num[2:]
+            if num in allowed or subscriber in allowed:
+                continue
+            if len(set(subscriber)) == 1:  # 9999999999 and friends are obvious test doubles
+                continue
+            offenders.append(f"{rel}: phone number {num[:4]}... is not sample data")
     assert not offenders, "private data in tracked files:\n  " + "\n  ".join(sorted(set(offenders)))
 
 
@@ -621,3 +627,105 @@ def test_the_committed_sample_data_is_the_generated_one():
     assert len(list(ws.iter_rows(values_only=True))) - 1 == len(CUSTOMERS)
     csv_rows = (root / "fixtures" / "orders_dummy.csv").read_text(encoding="utf-8").strip().splitlines()
     assert len(csv_rows) - 1 == len(ORDERS), "orders_dummy.csv disagrees with the other formats"
+
+
+# ---------------- running on a host with a throwaway filesystem ----------------
+@pytest.mark.parametrize("raw,expected,ssl", [
+    ("postgres://u:p@dpg-abc/db", "postgresql+asyncpg://u:p@dpg-abc/db", False),
+    ("postgresql://u:p@dpg-abc/db", "postgresql+asyncpg://u:p@dpg-abc/db", False),
+    ("postgresql://u:p@dpg-a.oregon-postgres.render.com/db?sslmode=require",
+     "postgresql+asyncpg://u:p@dpg-a.oregon-postgres.render.com/db", True),
+    ("mysql://u:p@h/db", "mysql+aiomysql://u:p@h/db", False),
+    ("sqlite:///./x.db", "sqlite+aiosqlite:///./x.db", False),
+    ("postgresql+asyncpg://u:p@h/db", "postgresql+asyncpg://u:p@h/db", False),
+])
+def test_a_hosted_database_url_is_accepted_as_given(raw, expected, ssl):
+    """Managed Postgres hands out `postgres://` with `sslmode=`, which this async app cannot use
+    verbatim - asyncpg rejects sslmode outright. Pasting the URL from the host must just work."""
+    s = Settings(database_url=raw)
+    assert s.database_url == expected
+    assert s.db_needs_ssl is ssl
+
+
+@pytest.mark.parametrize("url,dialect_name,expected_sql", [
+    ("sqlite+aiosqlite:///x.db", "sqlite", "date("),
+    ("mysql+aiomysql://u:p@h/d", "mysql", "date("),
+    ("postgresql+asyncpg://u:p@h/d", "postgresql", "CAST("),
+])
+def test_grouping_by_day_works_on_every_database(url, dialect_name, expected_sql):
+    """PostgreSQL has no date() function; SQLite mangles a CAST to DATE. One expression cannot serve
+    both, so the dashboard's daily chart needs a dialect-aware one."""
+    import importlib
+
+    from sqlalchemy import select
+
+    from app import config as cfg
+    from app.db import day_of
+    from app.models import MessageLog
+
+    dialect = importlib.import_module(f"sqlalchemy.dialects.{dialect_name}").dialect()
+    saved = cfg.overrides()
+    cfg.apply_overrides({**saved, "database_url": url})
+    try:
+        sql = str(select(day_of(MessageLog.created_at)).compile(dialect=dialect))
+    finally:
+        cfg.apply_overrides(saved)
+    assert expected_sql in sql, sql
+
+
+@pytest.mark.asyncio
+async def test_sqlite_on_an_ephemeral_host_is_a_failure_not_a_note(monkeypatch):
+    """On Render the SQLite file and the generated .secret_key are wiped by every deploy, taking the
+    customers, the chat log and the edited messages with them. Saying "fine for one server" there
+    would be wrong advice."""
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setattr(get_settings(), "secret_key", "")
+    assert preflight.ephemeral_host() == "Render"
+
+    r = await preflight.run_checks(deep=False, base_url="https://bot.example.com/")
+    checks = {c["key"]: c for c in r["checks"]}
+    assert checks["database"]["status"] == "fail"
+    assert "deleted every time you deploy" in checks["database"]["fix"]
+    assert checks["secret_key"]["status"] == "fail" and "SECRET_KEY" in checks["secret_key"]["fix"]
+
+    monkeypatch.delenv("RENDER")
+    assert preflight.ephemeral_host() == ""
+    r = await preflight.run_checks(deep=False, base_url="https://bot.example.com/")
+    assert next(c for c in r["checks"] if c["key"] == "database")["status"] == "warn"
+
+
+# ---------------- the webhook secret is a secret, not a URL ----------------
+@pytest.mark.parametrize("token,broken,hint", [
+    ("wati_7001f457-abcd-efgh-1234-567890abcdef", False, ""),
+    ("x" * 40, False, ""),
+    ("https://bot.onrender.com/webhook/wati?token=wati_7001f457", True, "whole webhook address"),
+    ("bot.example.com/webhook/wati?token=abc", True, "whole webhook address"),
+    ("secret with spaces", True, "space or line break"),
+    ("abc=def&ghi", True, "? & or ="),
+    ("y" * 200, True, "characters long"),
+])
+def test_a_webhook_url_pasted_into_the_token_is_caught(token, broken, hint):
+    """Pasting the whole address into WATI_WEBHOOK_TOKEN builds
+    `...?token=https://.../webhook/wati?token=xxx`, which can never match what WATI sends - and the
+    only symptom is a 401 that looks like WATI's fault."""
+    from app.services.preflight import webhook_token_problem
+
+    problem = webhook_token_problem(token)
+    assert bool(problem) is broken, (token[:40], problem)
+    if broken:
+        assert hint in problem
+
+
+@pytest.mark.asyncio
+async def test_a_broken_webhook_secret_is_never_pasted_into_the_address(monkeypatch):
+    """If the secret is wrong we must not hand out an address built from it - that would just get
+    registered in WATI and fail again."""
+    monkeypatch.setattr(get_settings(), "public_base_url", "https://bot.example.com")
+    monkeypatch.setattr(get_settings(), "wati_webhook_token",
+                        "https://bot.example.com/webhook/wati?token=wati_7001f457")
+    url = preflight.hook_url_for(get_settings(), "")
+    assert url == "https://bot.example.com/webhook/wati?token=<WATI_WEBHOOK_TOKEN>"
+
+    r = await preflight.run_checks(deep=False, base_url="https://bot.example.com/")
+    check = next(c for c in r["checks"] if c["key"] == "webhook_token")
+    assert check["status"] == "fail" and "whole webhook address" in check["fix"]
