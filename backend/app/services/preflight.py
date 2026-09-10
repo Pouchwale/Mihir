@@ -248,6 +248,12 @@ def _security(s, base_url: str) -> list[Check]:
     host_problem = _public_host_problem(public_base(s, base_url))
     hook_url = hook_url_for(s, base_url)
     shape = webhook_token_problem(s.wati_webhook_token)
+    # Certain, where the shape rules only guess: the same string in both boxes. Worth saying plainly,
+    # because the two names look interchangeable and only one of them is issued by WATI.
+    if s.wati_token and s.wati_webhook_token and s.wati_webhook_token == s.wati_token:
+        shape = ("This is the same value as WATI_TOKEN. They are two different secrets: WATI_TOKEN is issued by "
+                 "WATI and lets this bot send messages; WATI_WEBHOOK_TOKEN is one you invent, and proves an "
+                 "incoming call really came from WATI.")
     # Whatever the specific mistake, always say who issues this value and hand over a usable one.
     # Naming only the mistake sends people into the WATI portal looking for a value it never had.
     hook_fix = ""
@@ -300,8 +306,18 @@ def _whatsapp(s, wati_status: dict | None, hooks=NOT_CHECKED, expected_url: str 
         where)
     shape = token_shape_problem(s.wati_token)
     if s.wati_token:
-        add("wati_token_format", "Token format", "fail" if shape else "pass",
-            shape or "looks like a WATI token", shape, where)
+        # The shape rule is a guess about why a connection MIGHT fail. Once WATI has accepted the
+        # token the guess is settled, and repeating it tells the owner to replace a credential that
+        # demonstrably works. Not every WATI account is issued a JWT, so the guess alone is never
+        # a "fail" either - evidence beats the heuristic in both directions.
+        connected = bool((wati_status or {}).get("connected"))
+        if connected:
+            status, detail, fix = "pass", "accepted by WATI", ""
+        elif shape:
+            status, detail, fix = ("fail" if wati_status else "warn"), shape, shape
+        else:
+            status, detail, fix = "pass", "looks like a WATI token", ""
+        add("wati_token_format", "Token format", status, detail, fix, where)
     add("wati_base_url", "WATI tenant URL", "pass" if s.wati_base_url_ok else "fail",
         s.wati_base_url,
         "" if s.wati_base_url_ok else "WATI_BASE_URL must end with your own tenant id, e.g. "

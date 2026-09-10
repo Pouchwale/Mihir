@@ -856,3 +856,38 @@ async def test_the_self_test_repeats_the_specific_problem(monkeypatch):
         r = (await c.post("/admin/api/wati/self-test", headers=H)).json()
     assert r["ok"] is False
     assert r["detail"].startswith("WATI_WEBHOOK_TOKEN") and "PUBLIC_BASE_URL" not in r["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_token_wati_accepts_is_never_called_malformed(monkeypatch):
+    """A live account showed "Token accepted by WATI" and "does not look like a WATI API token" side
+    by side. Not every account is issued a JWT, so the shape rule is a guess about why a connection
+    might fail - and once WATI has accepted the token it is settled. Telling someone to replace a
+    working credential is the most expensive kind of wrong."""
+    odd_but_working = "wati-" + "z" * 160          # no 'eyJ', no dots - and WATI accepts it
+    checks = preflight._whatsapp(
+        get_settings().model_copy(update={"wati_token": odd_but_working}),
+        {"connected": True, "detail": "Token accepted by WATI."})
+    fmt = next(c for c in checks if c.key == "wati_token_format")
+    assert fmt.status == "pass" and fmt.fix == ""
+
+    # when WATI refused, the same shape is a useful explanation of why
+    checks = preflight._whatsapp(
+        get_settings().model_copy(update={"wati_token": odd_but_working}),
+        {"connected": False, "detail": "401"})
+    assert next(c for c in checks if c.key == "wati_token_format").status == "fail"
+
+    # untested (shallow run): a guess, so a nudge rather than a blocker
+    checks = preflight._whatsapp(get_settings().model_copy(update={"wati_token": odd_but_working}), None)
+    assert next(c for c in checks if c.key == "wati_token_format").status == "warn"
+
+
+@pytest.mark.asyncio
+async def test_the_same_secret_in_both_boxes_is_named(monkeypatch):
+    """Two settings whose names differ by one word, one of which WATI issues and one it does not."""
+    same = "eyJhbGciOiJIUzI1NiJ9." + "b" * 120 + ".sig"
+    monkeypatch.setattr(get_settings(), "wati_token", same)
+    monkeypatch.setattr(get_settings(), "wati_webhook_token", same)
+    r = await preflight.run_checks(deep=False, base_url="https://bot.example.com/")
+    fix = next(c for c in r["checks"] if c["key"] == "webhook_token")["fix"]
+    assert "same value as WATI_TOKEN" in fix and same not in fix
