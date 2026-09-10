@@ -101,6 +101,21 @@ async def _db():
         pass
 
 
+@pytest.fixture(autouse=True)
+def _isolate_module_state():
+    """Reset the process-wide state the app keeps between messages, so tests cannot leak into each
+    other: the WATI outbox is a capped deque (a long run silently drops the oldest entries), the
+    OpenAI breaker stays open for 5 minutes, and both throttles suppress later calls."""
+    from app.services import alerts, intent, rate_limit
+    from app.services.wati import wati
+
+    wati.outbox.clear()
+    intent.breaker_reset()
+    alerts.reset_throttle()
+    rate_limit.reset_webhook_limit()
+    yield
+
+
 @pytest_asyncio.fixture
 async def db():
     async with session_scope() as s:

@@ -68,8 +68,20 @@ async def lifespan(app: FastAPI):
         await dispose_db()
 
 
-app = FastAPI(title="WhatsApp Order Status Bot", version="1.0.0", lifespan=lifespan, docs_url="/docs")
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_methods=["*"], allow_headers=["*"])
+_startup = get_settings()  # app_mode cannot be changed from the dashboard, so reading it once is safe
+
+# In production the dashboard is served from this same origin, so CORS is not needed at all, and the
+# API docs would only advertise the admin surface to strangers.
+app = FastAPI(
+    title="WhatsApp Order Status Bot",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/docs" if _startup.is_dev else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if _startup.is_dev else None,
+)
+if _startup.is_dev:
+    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(webhook.router)
 app.include_router(health.router)
 app.include_router(admin.router)

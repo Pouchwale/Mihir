@@ -74,7 +74,11 @@ async def init_db() -> None:
 
 
 def _add_missing_columns(conn) -> None:
-    """Lightweight forward migration: add columns that exist in the models but not in the DB."""
+    """Lightweight forward migration: add columns that exist in the models but not in the DB.
+
+    ALTER TABLE cannot carry the Python-side default, so rows that already exist would keep NULL.
+    Backfill the default afterwards, otherwise an upgraded database behaves differently from a fresh
+    one (e.g. sessions.lang_chosen)."""
     from sqlalchemy import inspect, text
 
     insp = inspect(conn)
@@ -87,6 +91,12 @@ def _add_missing_columns(conn) -> None:
                 continue
             ddl = col.type.compile(dialect=conn.dialect)
             conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl}"))
+            default = col.default
+            if default is not None and not default.is_callable and not default.is_clause_element:
+                conn.execute(
+                    text(f"UPDATE {table.name} SET {col.name} = :v WHERE {col.name} IS NULL"),
+                    {"v": default.arg},
+                )
 
 
 async def dispose_db() -> None:

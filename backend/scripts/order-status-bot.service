@@ -8,10 +8,17 @@ Wants=network-online.target
 [Service]
 WorkingDirectory=/opt/order-status-bot/backend
 EnvironmentFile=/opt/order-status-bot/backend/.env
-ExecStart=/opt/order-status-bot/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*
+# --workers 1: the message queue worker and the scheduled jobs run inside the web process, so a
+# second worker would import customers twice and race for queued messages.
+ExecStart=/opt/order-status-bot/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips=*
 Restart=always
 RestartSec=3
 User=orderbot
+# Basic sandboxing: the bot only needs its own directory and the network.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target

@@ -12,3 +12,5 @@ dashboard/dist/
 backend/.secret_key
 backend/tests/_generated/
 backend/fixtures/~$*
+# Your own data for live testing (real phone numbers, real orders). Never committed.
+backend/local/

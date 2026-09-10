@@ -145,3 +145,23 @@ class AppSetting(Base):
 
 
 Index("ix_orders_so_fg", OrderCache.so_no, OrderCache.fg_item_code)
+
+
+class WebhookLog(Base):
+    """Every call WATI makes to /webhook/wati - including the ones we REFUSE.
+
+    Without this a rejected call is invisible on both sides: WATI's log shows "401" and the bot shows
+    nothing at all, so there is no way to tell whether the problem is the token WATI sends or the one
+    the bot expects. The token itself is never stored, only whether it matched."""
+
+    __tablename__ = "webhook_log"
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    client_ip: Mapped[str | None] = mapped_column(String(45))
+    status: Mapped[int] = mapped_column(Integer, index=True)  # HTTP status we replied with
+    outcome: Mapped[str] = mapped_column(String(30), index=True)  # queued | duplicate | ignored | rejected
+    reason: Mapped[str | None] = mapped_column(String(255))  # plain English, safe to show
+    phone_e164: Mapped[str | None] = mapped_column(String(15))
+    wati_msg_id: Mapped[str | None] = mapped_column(String(100))
+    event_type: Mapped[str | None] = mapped_column(String(40))
+    body_bytes: Mapped[int] = mapped_column(Integer, default=0)

@@ -173,8 +173,10 @@ async def test_wati_status_live(monkeypatch):
             respx.get(f"{base}/api/v1/getContacts").mock(return_value=Response(200, json={"result": "success"}))
             ok = await wati.check()
         assert ok["connected"] is True and ok["mocked"] is False
+        # a 401 is only blamed on the token once a second, unrelated endpoint refuses it too
         with respx.mock:
             respx.get(f"{base}/api/v1/getContacts").mock(return_value=Response(401, text="unauthorized"))
+            respx.get(f"{base}/api/v2/webhookEndpoints").mock(return_value=Response(401, text="unauthorized"))
             bad = await wati.check()
         assert bad["connected"] is False and "token" in bad["detail"].lower()
         with respx.mock:

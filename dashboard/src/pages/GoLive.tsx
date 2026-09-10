@@ -12,10 +12,46 @@ const TONE: Record<CheckStatus, { dot: string; card: string; label: string }> = 
 export default function GoLive() {
   const { data, error, loading, reload } = usePoll<Readiness>(() => api.readiness(true), 0);
   const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
 
   const run = async () => {
     setBusy(true);
+    setMsg(null);
     try { await reload(); } finally { setBusy(false); }
+  };
+
+  const applyEnv = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api.reloadSettings();
+      setMsg(r.wati_mocked
+        ? "Re-read backend/.env. WhatsApp is still simulated — the token or tenant URL is not set yet."
+        : "Re-read backend/.env. WhatsApp is now live.");
+      await reload();
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  };
+
+  const stale = data?.checks.find((c) => c.key === "env_fresh" && c.status !== "pass");
+  const hookMissing = data?.checks.find((c) => c.key === "webhook_registered" && c.status !== "pass");
+
+  const selfTest = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api.webhookSelfTest();
+      setMsg(`${r.ok ? "✅" : "❌"} ${r.detail}`);
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  };
+
+  const registerWebhook = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api.registerWebhook();
+      setMsg(r.ok ? r.detail : `Could not register it: ${r.detail}`);
+      await reload();
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
   };
 
   const groups: string[] = [];
@@ -31,10 +67,34 @@ export default function GoLive() {
             the security settings and the server itself. Each problem below says exactly what to change and where.
           </p>
         </div>
-        <button className="btn-primary ml-auto" disabled={busy || loading} onClick={run}>
-          {busy || loading ? "Checking…" : "Run the checks again"}
-        </button>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button className={stale ? "btn-primary" : "btn-ghost"} disabled={busy || loading} onClick={applyEnv}
+            title="Re-read backend/.env without restarting the bot">
+            Apply .env changes
+          </button>
+          {hookMissing && (
+            <button className="btn-primary" disabled={busy || loading} onClick={registerWebhook}
+              title="Ask WATI to send incoming messages here (no WATI dashboard needed)">
+              Register webhook in WATI
+            </button>
+          )}
+          <button className="btn-ghost" disabled={busy || loading} onClick={selfTest}
+            title="Call our own webhook address exactly as WATI would">
+            Test the webhook address
+          </button>
+          <button className={stale ? "btn-ghost" : "btn-primary"} disabled={busy || loading} onClick={run}>
+            {busy || loading ? "Checking…" : "Run the checks again"}
+          </button>
+        </div>
       </div>
+
+      {msg && <div className="card text-sm bg-sky-50 border-sky-200">{msg}</div>}
+      {stale && (
+        <div className="card border-2 border-amber-300 bg-amber-50/60 text-sm">
+          <b>You edited backend/.env after the bot started.</b> The bot is still using the old values — that is why a new
+          WATI token can look like it is being ignored. Press <b>Apply .env changes</b>, or restart the bot.
+        </div>
+      )}
 
       <ErrorBox msg={error} />
 

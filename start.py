@@ -16,7 +16,7 @@ def main():
     print("\n" + "="*60)
     print(" Launching WhatsApp Order Status Bot")
     print(" Single URL for Backend & Frontend: http://localhost:8000/")
-    print(" Admin Key: mihir (from backend/.env)")
+    print(" Sign in with the ADMIN_KEY value from backend/.env")
     print("="*60 + "\n")
 
     def open_browser():

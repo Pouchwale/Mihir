@@ -64,6 +64,11 @@ export const api = {
     req<SimResult>("/simulate", { method: "POST", body: JSON.stringify({ phone, text, type, selection }) }),
   // go-live readiness
   readiness: (deep = true) => req<Readiness>(`/readiness?deep=${deep}`),
+  reloadSettings: () => req<{ ok: boolean; wati_mocked: boolean; mode: string; readiness: Readiness }>("/settings/reload", { method: "POST" }),
+  registerWebhook: (phone_number = "") => req<{ ok: boolean; url?: string; detail: string }>("/wati/register-webhook", { method: "POST", body: JSON.stringify({ phone_number }) }),
+  diagnostics: () => req<Diagnostics>("/diagnostics"),
+  webhookSelfTest: () => req<{ ok: boolean; url: string; status?: number; detail: string }>("/wati/self-test", { method: "POST" }),
+  watiWebhooks: () => req<{ ok: boolean; detail?: string; webhooks: Record<string, unknown>[] }>("/wati/webhooks"),
   // data connections
   connections: () => req<Connections>("/connections"),
   saveConnections: (values: Record<string, unknown>) => req<{ ok: boolean; errors: Record<string, string>; fields?: Record<string, ConnField> }>("/connections", { method: "PUT", body: JSON.stringify({ values }) }),
@@ -82,6 +87,14 @@ export const api = {
   customSave: (c: CustomReply) => req<{ ok: boolean; errors: string[] }>("/templates/custom", { method: "POST", body: JSON.stringify(c) }),
   customTest: (text: string) => req<{ match: CustomReply | null }>("/templates/custom/test", { method: "POST", body: JSON.stringify({ text }) }),
 };
+
+export interface Diagnostics {
+  verdict: string; wati_mocked: boolean;
+  inbound: { at: string; client_ip: string | null; status: number; outcome: string; reason: string | null; phone: string | null; event_type: string | null; wati_msg_id: string | null }[];
+  outbound: { at: string; phone: string; kind: string; sent: boolean | null; error: string | null; text: string; simulated: boolean }[];
+  failed_queue: { at: string; phone: string; status: string; attempts: number; error: string | null }[];
+  alerts: { title: string; detail: string; level: string; at: string }[];
+}
 
 export type CheckStatus = "pass" | "warn" | "fail";
 export interface Check { key: string; title: string; status: CheckStatus; detail: string; fix: string; where: string; group: string }

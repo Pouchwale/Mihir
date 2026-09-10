@@ -11,6 +11,7 @@ import Settings from "./pages/Settings";
 import Data from "./pages/Data";
 import Templates from "./pages/Templates";
 import GoLive from "./pages/GoLive";
+import Diagnostics from "./pages/Diagnostics";
 
 const NAV = [
   ["/", "Overview"],
@@ -22,6 +23,7 @@ const NAV = [
   ["/imports", "Data sources"],
   ["/data", "Browse data"],
   ["/settings", "Settings"],
+  ["/diagnostics", "Diagnostics"],
   ["/go-live", "Go live"],
 ] as const;
 
@@ -107,6 +109,7 @@ export default function App() {
           <Route path="/imports" element={<Imports />} />
           <Route path="/data" element={<Data />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/diagnostics" element={<Diagnostics />} />
           <Route path="/go-live" element={<GoLive />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -11,6 +12,11 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BACKEND_DIR / ".env"
+# .env is read once, when the first Settings object is built. Editing it while the server runs has no
+# effect (uvicorn --reload watches .py files only), which looks exactly like "my credentials are
+# ignored". Remember when we read it so the dashboard can say "restart, or press Apply".
+PROCESS_STARTED = time.time()
 
 DEFAULT_COLUMN_MAP = {
     "so_no": "SO No",
@@ -30,6 +36,11 @@ class Settings(BaseSettings):
     app_mode: Literal["dev", "prod"] = "dev"
     database_url: str = "sqlite+aiosqlite:///./order_bot.db"
     log_level: str = "INFO"
+
+    # The address the outside world reaches this server on, e.g. https://bot.example.com
+    # Set it when the bot sits behind a reverse proxy / tunnel: the app cannot reliably guess its own
+    # public address, and a wrong guess means the webhook URL handed to WATI is wrong.
+    public_base_url: str = ""
 
     admin_key: str = "change-me-admin-key"
     support_contact: str = "[phone/email]"
@@ -99,6 +110,12 @@ class Settings(BaseSettings):
     rate_limit_window_min: int = 10
     # One customer message may never block the queue for longer than this.
     queue_item_timeout_sec: int = 90
+    # Flood protection on the public webhook, per calling IP per 10 seconds.
+    webhook_max_per_10s: int = 120
+    # Rotating log file (empty = stdout only, which systemd/journald already rotates).
+    log_file: str = ""
+    log_max_mb: int = 20
+    log_backups: int = 5
 
     # Alerts
     alert_slack_webhook: str = ""
@@ -182,6 +199,24 @@ def apply_overrides(values: dict) -> None:
 
 def overrides() -> dict:
     return dict(_overrides)
+
+
+def env_changed_since_start() -> bool:
+    """True when backend/.env has been edited since this process read it, i.e. the values you are
+    looking at in the file are NOT the ones the bot is using."""
+    try:
+        return ENV_FILE.stat().st_mtime > PROCESS_STARTED
+    except OSError:
+        return False
+
+
+def reload_env() -> None:
+    """Re-read backend/.env without restarting. Settings saved in the dashboard still win.
+    Things fixed at import time (CORS, /docs, logging) still need a real restart."""
+    global PROCESS_STARTED
+    get_settings.cache_clear()
+    get_settings()  # rebuild now, so a bad .env fails here rather than mid-conversation
+    PROCESS_STARTED = time.time()
 
 
 @lru_cache

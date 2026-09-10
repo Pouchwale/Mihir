@@ -1,237 +1,259 @@
 # WhatsApp Order Status Bot
 
-Two things only: **WATI** (WhatsApp) and **this backend** (Python/FastAPI + MySQL, with a built-in admin dashboard).
-No n8n, no Docker, no logic inside WATI.
+A self-service WhatsApp assistant that lets verified customers check the production status of their own
+orders. Customers pick from tappable menus in English, Hindi or Gujarati; the bot verifies who they are,
+looks up only their own orders, and replies with the current status.
+
+Two moving parts: **WATI** carries the WhatsApp messages, and **this service** holds all the logic, the
+data connections and the admin dashboard. No workflow builder, no automation platform, no containers.
 
 ```
-Customer types "hii" ──▶ WATI ──webhook (message + number)──▶ POST /webhook/wati
-                                                                    │
-                                    1. verify number against the SAP customer Excel (phone → customer name)
-                                    2. take that customer's rows from the BOM PPC table (external API, cached every 5 min)
-                                       – only rows whose Customer Name is byte-identical to the Excel name
-                                    3. reply with a WhatsApp LIST of their SO numbers  ──▶ one tap
-                                    4. if the SO has several FG items: LIST of item codes ──▶ one tap
-                                    5. reply with the Real Status (PPC) + buttons "Check another SO" / "Done"
-Customer ◀── WATI ◀── sendSessionMessage / sendInteractiveListMessage / sendInteractiveButtonsMessage ◀──┘
+Customer message ─▶ WATI ─── webhook ──▶  Order Status Bot
+                                            1. verify the sender against the customer master (SAP export)
+                                            2. read that customer's rows from the production table
+                                               — matching the customer name exactly
+                                            3. offer their order numbers as tappable options
+                                            4. offer the items within the chosen order
+                                            5. reply with the production status
+Customer        ◀─── WATI ◀───────────────────────────────────────────────────────────┘
 ```
 
-Only **Real Status (PPC)** is ever sent to a customer. Connection status and other customers' data never leave the server (there is a test that proves it).
+**Only the production status field is ever sent to a customer.** Internal fields and other customers'
+data never leave the server, and there is a test that proves it.
 
 ---
 
-## 1. Run it now (dev: no WATI, no PPC API, SQLite, dummy data)
+## Contents
+
+1. [Features](#1-features) · 2. [Quick start](#2-quick-start) · 3. [The conversation](#3-the-conversation) ·
+4. [Editing what customers read](#4-editing-what-customers-read) · 5. [Connecting WATI](#5-connecting-wati) ·
+6. [Data sources](#6-data-sources) · 7. [Going live](#7-going-live) ·
+8. [Operations](#8-operations) · 9. [Security](#9-security) · 10. [Development](#10-development)
+
+---
+
+## 1. Features
+
+- **Tap-driven conversation** in English, Hindi and Gujarati, using WhatsApp reply buttons and list
+  messages, with typed input accepted everywhere as well.
+- **Two-stage verification**: the sender's number must appear in the customer master, and the customer
+  name on an order must match that record exactly before anything is disclosed.
+- **Every message is editable** from the dashboard — wording, button labels and which buttons appear —
+  with live preview and validation. No restart, no code change.
+- **Pluggable data sources**: the order table can come from an API, a SQL query or a file (JSON, CSV,
+  Excel or HTML), and the customer master from a folder, a network share, Dropbox or an HTTPS link.
+- **Operational tooling**: a go-live readiness check, a diagnostics view of both message directions, a
+  command-line health check, scheduled imports, alerting and backups.
+
+## 2. Quick start
+
+Runs locally with no WATI account and no production data — WhatsApp is simulated and sample data is
+loaded automatically.
 
 ```powershell
 cd backend
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
-copy .env.example .env                              # dev defaults: SQLite, WATI mocked, dummy fixtures
-.\.venv\Scripts\python -m app.seed                  # creates tables, imports fixtures, prints test phone/SO pairs
+copy .env.example .env
 .\.venv\Scripts\python -m uvicorn app.main:app --port 8000
 ```
 
-Open **http://localhost:8000/admin** and sign in with `ADMIN_KEY` from `.env`.
-**Simulator** → pick a customer → type `hi` → tap an SO → tap an item → see the status. Everything you see there is exactly what WhatsApp will show.
+Open **http://localhost:8000/admin** and sign in with the `ADMIN_KEY` value from `backend/.env`.
 
-Tests (SQLite by default; set `TEST_DATABASE_URL` to a MySQL URL to run the same suite on MySQL):
+Use **Simulator** to hold a full conversation as a customer: pick a sample customer, send `hi`, choose a
+language, then tap through to a status. What you see there is exactly what WhatsApp will show.
 
-```powershell
-cd backend
-.\.venv\Scripts\python -m pytest -q
-```
-
-Dashboard rebuild is only needed after changing `dashboard/src`:
+Rebuilding the dashboard is only needed after changing `dashboard/src`:
 
 ```powershell
 cd dashboard
 npm install
-npm run build          # outputs to backend/app/static/admin (served by the backend)
+npm run build        # outputs into backend/app/static/admin, served by the backend
 ```
 
-### Dummy data (dev)
-
-| Phone (waId) | Excel name | What happens |
-|---|---|---|
-| 919167861236 | Shree Packaging Pvt Ltd | list shows SO 45232, SO 45231 → each has 1 item → status directly |
-| 919876543210 | Mehta Foods | SO 45240 has 3 FG items → item list |
-| 919898012345 | Gujarat Polymers | SO 45250 has 2 FG items |
-| 919925001122 | Patel Agro Industries | PPC name has a trailing space → **mismatch** → verification failed |
-| 919033445566 | Sunrise Pharma | PPC name is upper-case → **mismatch** |
-| 919712345678 | Royal Textiles | SO 45280, also reachable by typing `PO PO-7777` |
-| 919081726354 / 919427000111 | Anand Dairy / Om Snacks | in Excel but no PPC rows → "no orders found" |
-| 910000000000 | — | not in Excel → verification failed (EN + HI + GU) |
-
-The customer import intentionally rejects row 10 (5-digit number) and row 11 (duplicate number); see **Imports**.
-
----
-
-## 2. What the customer sees (menus)
+## 3. The conversation
 
 ```
-first message of a window ─▶ greeting (one text for everyone)
-                             "Please choose your language"  [English] [हिंदी] [ગુજરાતી]
-                       ─▶ "Hello {customer_name}, how can we help you today?"
+first message of a window ─▶ greeting
+                             "Please choose your language"   [English] [हिंदी] [ગુજરાતી]
+                       ─▶ "Hello <customer>, how can we help you today?"
                              [Order status] [Change language] [Contact us]
-Order status ─▶ this customer's SO numbers as buttons (≤3) or a list ─▶ items of the SO (buttons / list)
-             ─▶ "Hello {customer_name}, Order: SO … Real Status: …"  [Check another SO] [Main menu] [Done]
+Order status ─▶ the customer's own order numbers ─▶ the items in that order
+             ─▶ the production status              [Check another] [Main menu] [Done]
 ```
 
-| Step | Type | Options |
+| Situation | Reply |
+|---|---|
+| First message after 30 minutes of silence, or after *Done* | Greeting, then the language question |
+| Language chosen, or "menu" | Main menu |
+| Order status | The customer's own orders — buttons for three or fewer, otherwise a list |
+| An order with several items | The item codes, buttons or list |
+| Status delivered | The status, with options to check another or finish |
+| Order or item not found | An apology with a way back to their order list |
+| Sender not in the customer master, or a name mismatch | A polite refusal in all three languages, with your support contact |
+
+A tapped option arrives from WATI as its own text, so tapped and typed answers pass through exactly the
+same parser and the same checks. If WATI declines an interactive message, the same content is re-sent as
+plain text listing the options, so the customer can always reply.
+
+The chosen language stays for the whole conversation regardless of what the customer types next.
+
+## 4. Editing what customers read
+
+**Dashboard → Messages.** Built for someone who does not write code, and nothing here needs a restart.
+
+- **Conversation map** — the whole chat drawn out; click any bot message to edit it.
+- **Change the words** in all three languages, with a live WhatsApp-style preview.
+- **Insert real values** by clicking a chip (order number, item code, status, support contact) — no
+  placeholder syntax to remember.
+- **Choose the buttons** under each message, within WhatsApp's limits. Renaming is safe: the bot learns
+  the new name, so a renamed *Done* still ends the conversation.
+- **Send a test** to a real WhatsApp number, including unsaved edits.
+- **History** of every change, and **Restore built-in** at any time.
+- **Custom replies** answer your own keywords (opening hours, and so on) without touching the order flow.
+
+Every save is validated — placeholders, WhatsApp length limits, and labels the bot would no longer
+understand — and a change that would break a message is refused with a plain explanation.
+
+## 5. Connecting WATI
+
+All conversation logic lives in this service; WATI is used only to carry messages. Any chatbot,
+auto-reply or keyword action configured inside WATI must be switched **off**, otherwise WATI answers
+before this service sees the message.
+
+**Credentials** (WATI → *Connector → API → Create API Token*; older accounts: *Settings → API Docs*):
+
+| Value | Goes in | Notes |
 |---|---|---|
-| first message after `SESSION_TIMEOUT_MIN` (30 min) of silence, or after `Done` | text + **Buttons** | greeting, then the language question with `English` · `हिंदी` · `ગુજરાતી` (typed "english" / "hindi" / "1" also work) |
-| language chosen, "menu", "hi" | **Buttons** | `Order status` · `Change language` · `Contact us` |
-| Order status | **Buttons** (≤3 SOs) or **List** (button "Select SO") | one per SO of *this customer only*, newest first, max 10. Settings → Conversation can force "always a list" |
-| SO with several items | **Buttons** (≤3) or **List** (button "Select item") | one per FG item code (max 10, else plain text) |
-| status delivered | **Buttons** | `Check another SO` · `Main menu` · `Done` |
-| SO / item not found | **Buttons** | `Show my orders` · `Main menu` |
-| no orders under this name | **Buttons** | `Main menu` · `Contact us` |
-| after a voice note | **Buttons** | `Yes` · `No` (confirms the transcribed number; speech-to-text misreads digits) |
-| number not in Excel / name mismatch | plain text | apology in EN + HI + GU with your support contact |
+| Tenant API endpoint | `WATI_BASE_URL` | must end with your own tenant id, e.g. `https://live-mt-server.wati.io/123456` |
+| Access token | `WATI_TOKEN` | shown only once |
+| Webhook secret | `WATI_WEBHOOK_TOKEN` | you choose this; WATI does not provide it |
+| Public address | `PUBLIC_BASE_URL` | the HTTPS address customers' messages arrive on |
 
-The chosen language sticks for the whole window whatever script the customer types in; `Change language` shows the buttons again.
-A tapped row or button arrives from WATI as text (its title), so typed and tapped answers go through the **same** parser and the same security checks. If WATI ever rejects an interactive message, the same text is sent with the options as numbered lines.
-Every text and every button label above is editable in dashboard → Messages; the button sets under the main menu, result, not-found and contact messages can be changed too.
+**Scopes.** WATI's tokens are scope-limited and WATI does not publish a full list, so match the picker to
+the calls this service makes:
 
----
+| Call | Purpose | Required |
+|---|---|---|
+| `POST /api/v1/sendSessionMessage/{number}` | every text reply | yes |
+| `POST /api/v1/sendInteractiveButtonsMessage` | button menus | yes |
+| `POST /api/v1/sendInteractiveListMessage` | list menus | yes |
+| `GET`/`POST /api/v2/webhookEndpoints` | registering the webhook from the dashboard | yes, unless registered in the WATI portal |
+| `GET /api/v1/getContacts` | connection test only | optional |
+| `GET /api/v1/getMedia` | voice notes | only when `VOICE_NOTES=true` |
 
-## 3. Messages — the visual editor (dashboard → Messages)
+A token that cannot read contacts is reported as a warning, not a failure — sending is unaffected. All of
+these endpoints are available on the Growth, Pro and Business plans.
 
-Built for someone who does not write code. Nothing here needs a restart or a developer.
+**Webhook.** Register `https://<your-domain>/webhook/wati?token=<WATI_WEBHOOK_TOKEN>` for the event
+*Message received*, either in the WATI portal or with **Register webhook in WATI** on the Go live page.
 
-**Conversation map** — the whole chat drawn as a picture: grey bubbles are what the customer sends,
-white bubbles are the bot's replies, arrows show what happens next ("taps an order with several items",
-"wrong item code", "taps Done"). Click any white bubble to edit that message.
+WATI retries any non-200 response and stops delivering events after repeated failures, so this service
+answers `200` to everything it can absorb, reserving rejection for callers that cannot prove they are
+WATI. Delivery health is shown on the Go live page.
 
-For each message you can:
+## 6. Data sources
 
-- **Change the words** in English / Hindi / Gujarati, with a live WhatsApp-style preview beside the editor.
-- **Insert real values** by clicking a chip — *Order number*, *Item code*, *Real status*, *Number of items*,
-  *Support contact*. No `{braces}` to type.
-- **Choose the buttons** under the message (add / remove *Check another SO*, *Done*, *Show my orders*,
-  *Main menu*), with WhatsApp's 3-button limit enforced. Renaming a button is safe: the bot learns the new
-  name, so a renamed *Done* still ends the chat.
-- **Send a test to a real WhatsApp number** — the exact message you are looking at, including unsaved edits.
-- **See history** of every change and **Restore built-in** at any time.
+**Dashboard → Data sources.** Both connections are configured on screen — no file editing, no restart.
+Saved values are stored in the database and take precedence over `.env`; **Reset** restores the `.env`
+value. Passwords are encrypted before storage and never displayed again.
 
-**Custom replies** let you add your own keyword answers (e.g. `timing, office hours, समय` → your office
-hours, with buttons). They never interrupt an order lookup or a Yes/No answer.
+**Order data.** Choose an API endpoint (URL, method, key placement), a read-only database query, or a
+file this server can read. Formats JSON, CSV, Excel and HTML tables are detected automatically. **Test
+connection** fetches without saving and lets you map the columns from the names actually found. Order
+number, customer name and status are required. Set the refresh interval and the staleness warning.
 
-Every save is checked before it can go live: missing or unknown placeholders, WhatsApp length limits
-(buttons 20 characters, list rows 24/72, section titles 24, footers 60, body 1024), and button labels that
-the bot could no longer understand. A change that would break a message is refused with a plain explanation.
+**Customer master.** Choose a folder or network share, Dropbox, or an HTTPS download link. Map the code,
+name and phone columns, set the daily import time, and use **Test connection** to see exactly which rows
+would be accepted or skipped, and why.
 
-**How a change reaches the customer:** saved text goes to the `templates` table → the in-memory cache
-reloads immediately → `replies.build()` → `processor` → the WATI API → WhatsApp. The header of the page
-shows the live WATI connection status (green = connected, amber = test mode with no token, red = a problem
-with the token or URL).
+Phone numbers are normalised; invalid and duplicate entries are rejected and listed per run. Customer
+names are stored **exactly** as supplied — the exact-match rule depends on it. Every import is listed
+with the columns seen, the rows skipped and the reason.
 
----
+## 7. Going live
 
-## 4. What to do in WATI (configuration only — do NOT use the workflow builder)
+**Dashboard → Go live** is the checklist. It tests the WATI connection, both data sources, the security
+settings and the server, and prints the exact fix for anything that is not ready.
 
-1. **Settings → API Docs**: copy the tenant endpoint (`https://live-mt-server.wati.io/<tenantId>`) and the bearer token → `WATI_BASE_URL`, `WATI_TOKEN`.
-2. **Settings → Webhooks**: add `https://<your-domain>/webhook/wati?token=<WATI_WEBHOOK_TOKEN>` for the event **Message received**. WATI does not sign payloads, so the secret lives in the URL and the backend checks it.
-3. **Automation / Chatbots**: turn off every chatbot flow and default reply. An active flow intercepts messages before your webhook fires.
-4. Optional: one approved template (e.g. `order_status_followup`) if you ever need to message a customer first (outside the 24-hour window). Lists and buttons themselves need no template inside the window.
-5. Before you have a public server: `ngrok http 8000` and use that HTTPS URL in step 2.
-
-Why not the builder: verification needs database lookups and byte-exact name matching, voice notes need speech-to-text, the menus are built from live PPC data, and an active flow would swallow messages.
-
-WATI endpoints used (verified against WATI's OpenAPI):
-`POST /api/v1/sendSessionMessage/{waId}?messageText=…` · `POST /api/v1/sendInteractiveListMessage?whatsappNumber=…` · `POST /api/v1/sendInteractiveButtonsMessage?whatsappNumber=…` · `GET /api/v1/getMedia?fileName=…`.
-Inbound webhook fields used: `id`, `waId`, `type`, `text`, `data`, `listReply`, `interactiveButtonReply`, `buttonReply`, `eventType`, `owner`.
-`WATI_API_VERSION=v3` switches the interactive sends to `/api/ext/v3/conversations/messages/interactive`.
-
----
-
-## 5. Data sources (dashboard → **Data**)
-
-Both connections are set up on screen — no `.env` editing, no restart. What you save is stored in the
-database and wins over `.env`; **Reset** puts the `.env` value back. Passwords are encrypted before they
-are stored and are never shown again, only `••••1234`.
-
-### Order data (PPC) — Data → Order data
-Choose one of three sources:
-
-| Source | What you fill in |
-|---|---|
-| **API endpoint** | URL, GET/POST, the API key and how to send it (header / in the URL / bearer token) |
-| **Database query** | A read-only connection string and a SELECT |
-| **File on this server** | A path the PPC system writes to |
-
-Then set the file format (leave on *Detect automatically* — JSON, CSV, Excel and HTML tables are all
-recognised), press **Test connection**, and match the columns: the six dropdowns fill themselves with the
-column names actually found in your table. Order number, Customer name and Real status are required.
-Set how often to check for new data (default every 5 minutes) and when to warn you that data has gone
-stale. **Load data now** runs it immediately.
-
-### Customer Excel (SAP) — Data → Customer Excel
-Choose where the SAP B1 export lives:
-
-| Source | What you fill in |
-|---|---|
-| **Folder or network share** | `D:\SAP\exports\customers.xlsx` or `\\server\sap\customers.xlsx` |
-| **Dropbox** | App key, app secret, refresh token (scoped app with `files.content.read`) and the file path |
-| **Download link** | Any HTTPS link — SharePoint / OneDrive / web — with an optional key |
-
-Match the three columns (customer code, customer name, WhatsApp number), pick the daily import time, and
-press **Test connection**: it reads the file without importing and shows exactly which rows would be
-accepted and which skipped, and why. **Import now** runs it immediately; **Upload an Excel once** on the
-Import history tab handles a one-off file.
-
-Phone numbers are normalised to `91XXXXXXXXXX`; invalid and duplicate numbers are rejected and listed per
-run. Customer names are stored **exactly** as in the Excel — the byte-exact match against the PPC table
-depends on it.
-
-Every run, successful or not, is listed under **Import history** with the columns it saw, the rows it
-skipped and the reason.
-
----
-
-## 6. Production (WATI + backend only)
-
-1. **Server**: any Windows or Linux machine reachable from the internet over HTTPS (WATI will not call plain HTTP). Install Python 3.12 and MySQL 8 (Windows: `winget install Oracle.MySQL` or the MySQL installer; Linux: your distro's package). Create the database:
+1. **Server** — any Windows or Linux host reachable over HTTPS (WATI will not call plain HTTP and cannot
+   reach a private address). Install Python 3.12 and MySQL 8, then:
    ```sql
    CREATE DATABASE order_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
    ```
-   `utf8mb4_bin` keeps name comparisons byte-exact in SQL as well (the code re-checks in Python regardless).
-2. **.env**: `APP_MODE=prod`, `DATABASE_URL=mysql+aiomysql://user:pass@localhost:3306/order_bot`, a long random `ADMIN_KEY` and `WATI_WEBHOOK_TOKEN`, `SUPPORT_CONTACT`, WATI values from section 4, PPC values from section 5, Dropbox values, optional `GROQ_API_KEY` (voice notes), `OPENAI_API_KEY` (better intent/language; the bot works without it), `ALERT_SLACK_WEBHOOK`.
-3. **HTTPS**: either give uvicorn the certificate directly (`-CertFile`/`-KeyFile` below; a free certificate via win-acme / certbot) or put your existing reverse proxy in front on 443.
-4. **Run at boot**
-   - Windows (built-in Task Scheduler, no extra software): elevated PowerShell → `cd backend; .\scripts\install_windows_task.ps1 -Port 443 -CertFile C:\certs\fullchain.pem -KeyFile C:\certs\privkey.pem`. Logs in `backend\logs\`.
-   - Linux: `scripts/order-status-bot.service` (systemd).
-5. **Dashboard**: `cd dashboard; npm install; npm run build` once on your machine and deploy the `backend/app/static/admin` folder with the backend (or build on the server).
-6. **Go-live check** (also on the dashboard Settings page): Test fetch green → Import customers → Imports shows expected rejects → `/admin/mismatches` empty or explained → message the number from your own phone (text, tap a menu, voice note).
-7. **Operations**: daily `scripts/backup_db.ps1` (Task Scheduler) or `scripts/backup_db.sh` (cron); uptime monitor on `GET /health` (reports last customer sync, last PPC refresh, stale flag); rate limit `RATE_LIMIT_MSGS` per `RATE_LIMIT_WINDOW_MIN` per phone; sessions reset after `SESSION_TIMEOUT_MIN` idle.
+2. **Configure** `backend/.env` — see `.env.example`, which marks every value required for go-live. In
+   production the service **refuses to start** while the admin key, webhook token, tenant URL or support
+   contact is still an example value, and says which.
+3. **HTTPS** — a certificate on the service directly, or a reverse proxy in front. Set `PUBLIC_BASE_URL`.
+4. **Run at boot**, always as a **single** worker process (the message queue and the scheduled imports run
+   inside the web process):
+   - Windows: `backend\scripts\install_windows_task.ps1`
+   - Linux: `backend/scripts/order-status-bot.service`
+5. **Register the webhook** and switch off WATI's own automations.
+6. **Verify** — press *Test the webhook address*, work through Go live until nothing is red, then message
+   the number from a phone in the customer master and complete one lookup.
 
----
+## 8. Operations
 
-## 7. Endpoints
+| Tool | Purpose |
+|---|---|
+| **Go live** | Every readiness check, each with its fix |
+| **Diagnostics** | Both directions — what WATI sent us and what we sent WATI, including refusals and why |
+| **Chat log** | Every message in and out, with the outcome |
+| **Sessions** | Where each customer currently is in the conversation |
+| **Mismatches** | Orders skipped because the customer name did not match exactly |
+| `python -m app.doctor` | The same checks from the command line; prints no secrets |
+| `GET /health` | Liveness, last import times and a staleness flag, for uptime monitoring |
+
+Backups: `backend/scripts/backup_db.ps1` (Windows Task Scheduler) or `backup_db.sh` (cron) — both handle
+MySQL and SQLite. Failures raise an alert in the dashboard, and to Slack when `ALERT_SLACK_WEBHOOK` is set.
+
+## 9. Security
+
+- The webhook is authenticated by a secret in its URL, compared in constant time, with size limits and
+  flood protection for unauthenticated callers.
+- The dashboard requires an admin key; in production the API documentation and cross-origin access are
+  disabled.
+- Connection passwords are encrypted at rest; secrets are never written to logs or shown in the UI.
+- Only the production status field can reach a customer, enforced in code and covered by tests.
+- Voice notes are off by default: speech-to-text can misread digits, and looking up the wrong order is
+  worse than asking the customer to type.
+
+## 10. Development
+
+```powershell
+cd backend
+.\.venv\Scripts\python -m pytest -q          # set TEST_DATABASE_URL to run the same suite on MySQL
+```
+
+The suite covers the conversation in all three languages by tap and by typing, every failure path, the
+WATI transport, production configuration, and a replay of the whole conversation after every message and
+button has been renamed. Sample data used by the tests is generated by `backend/scripts/make_fixtures.py`;
+keep your own test data in `backend/local/`, which is never committed.
+
+### Endpoints
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/webhook/wati?token=…` | webhook token | WATI entry point (dedup by message id, enqueue, 200 in < 1 s) |
-| GET | `/health` | none | liveness + last sync times + stale flag |
-| GET | `/admin/` | admin key (UI login) | dashboard |
-| * | `/admin/api/*` | `X-Admin-Key` | overview, sessions, messages, mismatches, imports, import-customers, refresh-orders, test-fetch, orders-source, customers, orders, outbox, queue, simulate |
-| * | `/admin/api/templates…` | `X-Admin-Key` | template editor: catalog, preview, save, reset, history, custom replies |
-| POST/GET | `/admin/import-customers`, `/admin/refresh-orders`, `/admin/mismatches`, `/admin/sessions/{phone}` | `X-Admin-Key` | spec aliases |
-| GET | `/docs` | none | OpenAPI |
+| POST | `/webhook/wati?token=…` | webhook token | WATI entry point — deduplicates, queues, answers in under a second |
+| GET | `/health` | none | liveness, last import times, staleness |
+| GET | `/admin/` | admin key | dashboard |
+| * | `/admin/api/*` | `X-Admin-Key` | overview, readiness, diagnostics, sessions, messages, imports, data sources, simulator, template editor |
 
-## 8. Layout
+### Layout
 
 ```
 backend/app/
-  main.py            FastAPI app; startup = tables + migrations, template cache, queue worker, scheduler, dev autoload; serves /admin
-  config.py          all settings (from .env)
-  models.py          customers, orders_cache, sessions, message_log, inbound_queue, name_mismatch_log, sync_runs, templates, template_history
-  routers/           webhook.py, admin.py, templates.py, health.py
-  services/          processor.py (pipeline), state_machine.py, verify.py, intent.py, menus.py, replies.py, templates.py, wati.py, stt.py, rate_limit.py, alerts.py
-  jobs/              queue_worker.py, customer_sync.py, order_refresh.py, session_cleanup.py, scheduler.py
-  adapters/          orders_http.py, orders_sql.py, orders_file.py, parsers/{json,csv,excel,html}_table.py, orders_base.py (column map)
-  utils/phone.py     phone normalisation
-backend/fixtures/    dummy data (10 customers xlsx, 10 orders in json/csv/xlsx/html)
-backend/scripts/     make_fixtures.py, install_windows_task.ps1, run_prod.ps1, order-status-bot.service, backup_db.ps1 / .sh
-backend/tests/       parsers, phone, verify, state machine, menus, templates, WATI HTTP, webhook, no-leak
-dashboard/           React + TypeScript + Tailwind + Recharts → builds into backend/app/static/admin
+  main.py            startup: schema, settings, template cache, queue worker, scheduler; serves the dashboard
+  config.py          every setting, read from .env
+  models.py          customers, orders, sessions, message and webhook logs, queue, imports, templates
+  routers/           webhook.py, admin.py, templates.py, connections.py, health.py
+  services/          processor, state_machine, verify, intent, menus, replies, templates,
+                     wati, stt, preflight, rate_limit, alerts, crypto, settings_store
+  jobs/              queue_worker, customer_sync, order_refresh, session_cleanup, scheduler
+  adapters/          order sources (http, sql, file) and parsers (json, csv, excel, html)
+  doctor.py          command-line health check
+backend/scripts/     fixture generator, service installers, backup scripts
+backend/tests/       conversation, transport, configuration and regression suites
+dashboard/           React + TypeScript + Tailwind, built into backend/app/static/admin
 ```

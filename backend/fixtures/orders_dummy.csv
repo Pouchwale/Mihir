@@ -1,5 +1,11 @@
-SO No,PO No,FG Item Code,Customer Name,Connection Status,Real Status (PPC)
-45240,PO-8801,FG-2001,Mehta Foods,CONN-PLANT-B-OK,Ready for Dispatch
-45240,PO-8801,FG-2002,Mehta Foods,CONN-PLANT-B-OK,Printing
-45240,PO-8801,FG-2003,Mehta Foods,CONN-PLANT-B-DELAY,Awaiting Material
-45280,PO-7777,FG-6001,Royal Textiles,CONN-PLANT-B-OK,Delivered
+"SO No","PO No","FG Item Code","Customer Name","Connection Status","Real Status (PPC)"
+"45231","PO-7781","FG-1001","Shree Packaging Pvt Ltd","CONN-PLANT-A-OK","In Production"
+"45232","PO-7782","FG-1002","Shree Packaging Pvt Ltd","CONN-PLANT-A-OK","Dispatched"
+"45240","PO-8801","FG-2001","Mehta Foods","CONN-PLANT-B-OK","Ready for Dispatch"
+"45240","PO-8801","FG-2002","Mehta Foods","CONN-PLANT-B-OK","Printing"
+"45240","PO-8801","FG-2003","Mehta Foods","CONN-PLANT-B-DELAY","Awaiting Material"
+"45250","PO-9901","FG-3001","Gujarat Polymers","CONN-PLANT-A-OK","Lamination"
+"45250","PO-9901","FG-3002","Gujarat Polymers","CONN-PLANT-A-OK","Slitting"
+"45260","PO-5555","FG-4001","Patel Agro Industries ","CONN-PLANT-C-OK","Cylinder Making"
+"45270","PO-6666","FG-5001","SUNRISE PHARMA","CONN-PLANT-C-OK","Quality Check"
+"45280","PO-7777","FG-6001","Royal Textiles","CONN-PLANT-B-OK","Delivered"

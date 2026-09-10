@@ -14,13 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import get_settings
 from ..db import get_db
 from ..jobs import customer_sync, order_refresh, queue_worker, scheduler, session_cleanup
-from ..models import Customer, InboundQueue, MessageLog, NameMismatchLog, OrderCache, Session, SyncRun, utcnow
-from ..services import alerts, intent, preflight
+from ..models import Customer, InboundQueue, MessageLog, NameMismatchLog, OrderCache, Session, SyncRun, WebhookLog, utcnow
+import structlog
+
+from ..services import alerts, intent, preflight, settings_store
 from ..services.state_machine import reset
 from ..services.wati import wati
 from .health import status_payload
 from .webhook import enqueue
 
+log = structlog.get_logger(__name__)
 router = APIRouter()
 
 
@@ -70,6 +73,135 @@ async def readiness(request: Request, deep: bool = True):
     """Everything that must be true before real customers can use the bot, each with the exact fix.
     deep=false skips the live connection tests (fast enough to poll)."""
     return await preflight.run_checks(deep=deep, base_url=str(request.base_url))
+
+
+@api.post("/wati/self-test")
+async def webhook_self_test(request: Request):
+    """Call our own public webhook exactly as WATI would, and report what happened.
+
+    This settles "is it WATI or is it us": it exercises DNS, TLS, any reverse proxy, the token check
+    and the queue. The probe carries an eventType the pipeline ignores, so it never invents a
+    customer message. A pass here means WATI will get through too, unless WATI's own IPs are blocked."""
+    import httpx
+
+    s = get_settings()
+    url = preflight.hook_url_for(s, str(request.base_url))
+    if "<" in url:
+        return {"ok": False, "url": url,
+                "detail": "Set PUBLIC_BASE_URL and a real WATI_WEBHOOK_TOKEN first, then try again."}
+    payload = {"eventType": "sessionMessageSent", "id": f"selftest-{uuid.uuid4().hex}", "text": "self test"}
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
+            r = await c.post(url, json=payload, headers={"Content-Type": "application/json"})
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "url": url, "detail":
+                f"Could not reach {url} from this server: {e}. The address is wrong, DNS/TLS is not set up, "
+                "or a firewall is in the way - WATI would fail the same way."}
+    if r.status_code == 200:
+        return {"ok": True, "url": url, "status": 200,
+                "detail": "The webhook address works end to end. WATI can deliver customer messages here."}
+    if r.status_code == 401:
+        return {"ok": False, "url": url, "status": 401, "detail":
+                "The address is reachable but the token was refused - so a 401 in WATI means the ?token= "
+                "registered there does not match WATI_WEBHOOK_TOKEN. Press 'Register webhook in WATI' to fix it."}
+    return {"ok": False, "url": url, "status": r.status_code,
+            "detail": f"The address answered {r.status_code}: {r.text[:200]}"}
+
+
+class WebhookIn(BaseModel):
+    phone_number: str = ""  # your WhatsApp business number; blank = reuse what WATI already has
+
+
+@api.post("/wati/register-webhook")
+async def register_wati_webhook(request: Request, body: WebhookIn):
+    """Tell WATI where to post incoming customer messages, over the API.
+
+    The same thing you would do in WATI -> Settings -> Webhooks, for accounts that have API access
+    but no dashboard login. Without this the bot can send but never receives."""
+    s = get_settings()
+    if s.wati_mocked:
+        raise HTTPException(400, "WATI is in simulation mode - set WATI_TOKEN and a real WATI_BASE_URL first.")
+    url = preflight.hook_url_for(s, str(request.base_url))
+    problem = preflight._public_host_problem(str(request.base_url))
+    if problem or "<" in url:
+        raise HTTPException(400, problem or "Set a real WATI_WEBHOOK_TOKEN before registering the webhook.")
+    try:
+        result = await wati.register_webhook(url, body.phone_number)
+    except Exception as e:  # noqa: BLE001 - report it, never 500 the dashboard
+        return {"ok": False, "detail": str(e), "url": url}
+    return {"ok": True, "url": url, "detail": f"WATI will now post incoming messages to {url}", "result": result}
+
+
+@api.get("/wati/webhooks")
+async def list_wati_webhooks():
+    """What WATI currently has registered, so you can see it without the WATI dashboard."""
+    if get_settings().wati_mocked:
+        return {"ok": False, "detail": "WATI is in simulation mode.", "webhooks": []}
+    try:
+        return {"ok": True, "webhooks": await wati.list_webhooks()}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": str(e), "webhooks": []}
+
+
+@api.post("/settings/reload")
+async def reload_settings(request: Request):
+    """Re-read backend/.env without restarting - the usual reason a new WATI token 'does nothing'.
+    Values saved in the dashboard still win. CORS, /docs and logging are fixed at start-up and still
+    need a real restart; nothing else does."""
+    from ..config import reload_env
+
+    reload_env()
+    await settings_store.load_from_db()  # dashboard-saved values win, so re-apply them on top
+    s = get_settings()
+    log.info("env_reloaded", wati_mocked=s.wati_mocked, mode=s.app_mode)
+    return {"ok": True, "wati_mocked": s.wati_mocked, "mode": s.app_mode,
+            "readiness": await preflight.run_checks(deep=True, base_url=str(request.base_url))}
+
+
+@api.get("/diagnostics")
+async def diagnostics(db: AsyncSession = Depends(get_db), limit: int = 50):
+    """One place to see whether a problem is on WATI's side or ours.
+
+    IN  - every call WATI made to our webhook, including the ones we refused (a 401 here means the
+          token in WATI's webhook URL does not match ours).
+    OUT - every message we tried to send to WATI, including failures with WATI's own reason.
+    If IN is empty, WATI is not reaching us at all: the webhook is not registered, points elsewhere,
+    or the server is not publicly reachable."""
+    s = get_settings()
+    calls = (await db.execute(select(WebhookLog).order_by(desc(WebhookLog.id)).limit(limit))).scalars().all()
+    inbound = [{
+        "at": _dt(c.created_at), "client_ip": c.client_ip, "status": c.status, "outcome": c.outcome,
+        "reason": c.reason, "phone": c.phone_e164, "event_type": c.event_type, "wati_msg_id": c.wati_msg_id,
+    } for c in calls]
+
+    outbox = list(wati.outbox)[-limit:][::-1]
+    outbound = [{
+        "at": o.get("at"), "phone": o.get("phone"), "kind": o.get("kind"),
+        "sent": o.get("sent", None if s.wati_mocked else False), "error": o.get("error"),
+        "text": (o.get("text") or "")[:160], "simulated": s.wati_mocked,
+    } for o in outbox]
+
+    failed = (await db.execute(
+        select(InboundQueue).where(InboundQueue.status.in_(("failed", "processing"))).order_by(desc(InboundQueue.id)).limit(limit)
+    )).scalars().all()
+
+    rejected = [c for c in calls if c.outcome == "rejected"]
+    if not calls:
+        verdict = ("WATI has never called this server. Either the webhook is not registered, it points at a different "
+                   "address, or this server is not reachable from the internet. Check 'Webhook registered in WATI' on the Go live page.")
+    elif rejected and rejected[0].id == calls[0].id:
+        verdict = f"The most recent call from WATI was REFUSED by this server: {rejected[0].reason}"
+    else:
+        verdict = f"WATI is reaching this server ({len(calls)} recent calls, {len(rejected)} refused)."
+
+    return {
+        "verdict": verdict,
+        "wati_mocked": s.wati_mocked,
+        "inbound": inbound,
+        "outbound": outbound,
+        "failed_queue": [{"at": _dt(f.updated_at), "phone": f.phone_e164, "status": f.status, "attempts": f.attempts, "error": f.error} for f in failed],
+        "alerts": list(alerts.recent)[-20:][::-1],
+    }
 
 
 @api.get("/overview")
