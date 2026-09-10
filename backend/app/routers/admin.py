@@ -86,9 +86,9 @@ async def webhook_self_test(request: Request):
 
     s = get_settings()
     url = preflight.hook_url_for(s, str(request.base_url))
-    if "<" in url:
-        return {"ok": False, "url": url,
-                "detail": "Set PUBLIC_BASE_URL and a real WATI_WEBHOOK_TOKEN first, then try again."}
+    problem = preflight.hook_url_problem(s, str(request.base_url))
+    if problem:
+        return {"ok": False, "url": url, "detail": problem}
     payload = {"eventType": "sessionMessageSent", "id": f"selftest-{uuid.uuid4().hex}", "text": "self test"}
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
@@ -122,9 +122,9 @@ async def register_wati_webhook(request: Request, body: WebhookIn):
     if s.wati_mocked:
         raise HTTPException(400, "WATI is in simulation mode - set WATI_TOKEN and a real WATI_BASE_URL first.")
     url = preflight.hook_url_for(s, str(request.base_url))
-    problem = preflight._public_host_problem(str(request.base_url))
-    if problem or "<" in url:
-        raise HTTPException(400, problem or "Set a real WATI_WEBHOOK_TOKEN before registering the webhook.")
+    problem = preflight.hook_url_problem(s, str(request.base_url))
+    if problem:
+        raise HTTPException(400, problem)
     try:
         result = await wati.register_webhook(url, body.phone_number)
     except Exception as e:  # noqa: BLE001 - report it, never 500 the dashboard

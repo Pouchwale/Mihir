@@ -126,13 +126,38 @@ def public_base(s, base_url: str = "") -> str:
     return (s.public_base_url or base_url or "").rstrip("/")
 
 
+def hook_url_problem(s, base_url: str = "") -> str:
+    """Why the webhook address cannot be built yet - naming the ONE value at fault.
+
+    "set PUBLIC_BASE_URL and a real WATI_WEBHOOK_TOKEN" is useless when one of the two is already
+    correct: it sends you checking a setting that was never wrong."""
+    base = public_base(s, base_url)
+    if not base:
+        return ("PUBLIC_BASE_URL is not set. Set it to this service's public address, e.g. "
+                "https://your-app.onrender.com - the app cannot work it out from behind a proxy.")
+    host_problem = _public_host_problem(base)
+    if host_problem:
+        return f"PUBLIC_BASE_URL is {base}, which WATI cannot use. {host_problem}"
+    token = s.wati_webhook_token
+    if token == INSECURE_DEFAULTS["wati_webhook_token"]:
+        return "WATI_WEBHOOK_TOKEN is still the example value. Set it to a long random secret you invent."
+    if len(token) < MIN_WEBHOOK_TOKEN:
+        return (f"WATI_WEBHOOK_TOKEN is only {len(token)} characters. Use at least {MIN_WEBHOOK_TOKEN} - "
+                "it is the only thing protecting a public URL.")
+    shape = webhook_token_problem(token)
+    if shape:
+        return f"WATI_WEBHOOK_TOKEN is not usable. {shape}"
+    return ""
+
+
 def hook_url_for(s, base_url: str = "") -> str:
-    """The exact address WATI must call. '<your-domain>' when this server is not publicly reachable."""
+    """The exact address WATI must call. Placeholders appear only for the part that is wrong, so the
+    URL still shows what is already correct."""
+    base = public_base(s, base_url)
+    shown = base if (base and not _public_host_problem(base)) else "https://<PUBLIC_BASE_URL>"
     weak = (s.wati_webhook_token == INSECURE_DEFAULTS["wati_webhook_token"]
             or len(s.wati_webhook_token) < MIN_WEBHOOK_TOKEN
             or bool(webhook_token_problem(s.wati_webhook_token)))
-    base = public_base(s, base_url)
-    shown = base if (base and not _public_host_problem(base)) else "https://<your-domain>"
     return f"{shown}/webhook/wati?token={'<WATI_WEBHOOK_TOKEN>' if weak else s.wati_webhook_token}"
 
 

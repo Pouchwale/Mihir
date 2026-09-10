@@ -202,6 +202,26 @@ settings and the server, and prints the exact fix for anything that is not ready
 6. **Verify** — press *Test the webhook address*, work through Go live until nothing is red, then message
    the number from a phone in the customer master and complete one lookup.
 
+### Deploying on Render
+
+`render.yaml` in the repository root declares the web service and its PostgreSQL database together.
+Render → **Blueprints → New Blueprint Instance** → pick this repository; it prompts once for the
+values that must not live in git (the WATI credentials, the webhook secret, the public address and the
+support contact) and generates `SECRET_KEY` and `ADMIN_KEY` itself.
+
+Two things Render supplies, both easy to get wrong by hand:
+
+- **`$PORT`** — the service must bind to it. Copying the local `--port 8000` produces a deploy that
+  looks healthy and then times out.
+- **`DATABASE_URL`** — taken from the database, not pasted. It arrives as `postgresql://…`, which the
+  app converts to the async driver, TLS included.
+
+**Until the database is attached, nothing you save survives a deploy.** Render replaces the filesystem
+each time, so a SQLite database goes with it — customers, sessions, chat log and *the messages you
+edited in the dashboard*. Set `DATABASE_URL` to the Postgres instance and `SECRET_KEY` to a fixed
+value before relying on anything you configure through the dashboard. The Go live page reports both as
+failures while they are unset on a host like this.
+
 ## 8. Operations
 
 | Tool | Purpose |

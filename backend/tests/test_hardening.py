@@ -729,3 +729,80 @@ async def test_a_broken_webhook_secret_is_never_pasted_into_the_address(monkeypa
     r = await preflight.run_checks(deep=False, base_url="https://bot.example.com/")
     check = next(c for c in r["checks"] if c["key"] == "webhook_token")
     assert check["status"] == "fail" and "whole webhook address" in check["fix"]
+
+
+# ---------------- the deployment blueprint must match the code ----------------
+def _blueprint() -> dict:
+    import yaml
+
+    path = pathlib.Path(__file__).resolve().parents[2] / "render.yaml"
+    assert path.exists(), "render.yaml is missing"
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def test_the_render_blueprint_only_sets_real_settings():
+    """A renamed setting should fail here, not silently do nothing on the next deploy."""
+    service = _blueprint()["services"][0]
+    declared = {e["key"] for e in service["envVars"]}
+    known = {name.upper() for name in Settings.model_fields}
+    supplied_by_render = {"PYTHON_VERSION"}
+    unknown = declared - known - supplied_by_render
+    assert not unknown, f"render.yaml sets variables the app does not read: {sorted(unknown)}"
+
+
+def test_the_blueprint_supplies_everything_production_refuses_to_start_without():
+    """preflight.fatal_problems() blocks a prod boot on these, so a blueprint deploy must set them."""
+    declared = {e["key"] for e in _blueprint()["services"][0]["envVars"]}
+    required = {"APP_MODE", "ADMIN_KEY", "WATI_WEBHOOK_TOKEN", "SUPPORT_CONTACT", "WATI_BASE_URL",
+                "DATABASE_URL", "SECRET_KEY", "PUBLIC_BASE_URL"}
+    assert required <= declared, f"the blueprint would not boot: missing {sorted(required - declared)}"
+
+
+def test_the_blueprint_binds_to_the_port_render_provides():
+    """Copying the local `--port 8000` deploys cleanly and then times out with no useful error."""
+    service = _blueprint()["services"][0]
+    assert "$PORT" in service["startCommand"], service["startCommand"]
+    assert "--host 0.0.0.0" in service["startCommand"]
+    # the database must be wired from the database block, not pasted in as a literal
+    db_var = next(e for e in service["envVars"] if e["key"] == "DATABASE_URL")
+    assert db_var.get("fromDatabase", {}).get("name") == _blueprint()["databases"][0]["name"]
+    # SECRET_KEY must be generated and kept, never a literal that someone might change later
+    secret = next(e for e in service["envVars"] if e["key"] == "SECRET_KEY")
+    assert secret.get("generateValue") is True and "value" not in secret
+
+
+# ---------------- say WHICH value is wrong, not "set both" ----------------
+@pytest.mark.parametrize("base,token,names", [
+    ("", "change-me-webhook-token", "PUBLIC_BASE_URL"),
+    ("http://127.0.0.1:8000", "w" * 40, "PUBLIC_BASE_URL"),
+    ("https://app.onrender.com", "change-me-webhook-token", "WATI_WEBHOOK_TOKEN"),
+    ("https://app.onrender.com", "short", "WATI_WEBHOOK_TOKEN"),
+    ("https://app.onrender.com", "https://app.onrender.com/webhook/wati?token=abc", "WATI_WEBHOOK_TOKEN"),
+])
+def test_the_webhook_address_problem_names_one_value(base, token, names):
+    """Telling someone to set both sends them checking a setting that was never wrong."""
+    s = get_settings().model_copy(update={"public_base_url": base, "wati_webhook_token": token})
+    problem = preflight.hook_url_problem(s, "")
+    assert problem.startswith(names), problem
+    other = "WATI_WEBHOOK_TOKEN" if names == "PUBLIC_BASE_URL" else "PUBLIC_BASE_URL"
+    assert other not in problem, f"blames {other} as well: {problem}"
+
+
+def test_a_correct_pair_produces_the_address_and_no_complaint():
+    s = get_settings().model_copy(update={
+        "public_base_url": "https://app.onrender.com",
+        "wati_webhook_token": "wati_7001f457-abcd-efgh-ijkl-mnopqrstuvwx"})
+    assert preflight.hook_url_problem(s, "") == ""
+    assert preflight.hook_url_for(s, "") == (
+        "https://app.onrender.com/webhook/wati?token=wati_7001f457-abcd-efgh-ijkl-mnopqrstuvwx")
+
+
+@pytest.mark.asyncio
+async def test_the_self_test_repeats_the_specific_problem(monkeypatch):
+    monkeypatch.setattr(get_settings(), "public_base_url", "https://app.onrender.com")
+    monkeypatch.setattr(get_settings(), "wati_webhook_token",
+                        "https://app.onrender.com/webhook/wati?token=wati_7001f457")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = (await c.post("/admin/api/wati/self-test", headers=H)).json()
+    assert r["ok"] is False
+    assert r["detail"].startswith("WATI_WEBHOOK_TOKEN") and "PUBLIC_BASE_URL" not in r["detail"]

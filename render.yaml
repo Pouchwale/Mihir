@@ -1,0 +1,104 @@
+# Render Blueprint - the whole deployment in one file.
+#
+# Render dashboard -> Blueprints -> New Blueprint Instance -> pick this repository.
+# It creates the database and the web service together and prompts once for the values that must not
+# live in git. An existing service created by hand is not affected by this file.
+#
+# Two things Render supplies that are easy to get wrong by hand:
+#   $PORT          - the service MUST bind to it; copying the local `--port 8000` makes the deploy
+#                    look healthy and then time out.
+#   DATABASE_URL   - taken from the database below rather than pasted, so the two stay linked. It
+#                    arrives as `postgresql://…`; the app converts it to the async driver and handles
+#                    TLS itself (see Settings._async_driver in backend/app/config.py).
+
+databases:
+  - name: order-status-db
+    databaseName: order_bot
+    plan: free # a paid plan keeps daily backups and does not expire - worth it once real orders flow
+
+services:
+  - type: web
+    name: order-status-bot
+    runtime: python
+    rootDir: backend
+    plan: free # free instances sleep when idle: the first customer message after a nap is slow
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      # ---- supplied by Render ----
+      - key: DATABASE_URL
+        fromDatabase:
+          name: order-status-db
+          property: connectionString
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+
+      # ---- fixed ----
+      # In prod the service refuses to start while any value below is still an example, and says which.
+      - key: APP_MODE
+        value: prod
+
+      # ---- generated once by Render, then never changed ----
+      # SECRET_KEY encrypts the connection passwords saved in the dashboard. It MUST stay the same
+      # forever: change it and those passwords become unreadable (and fail silently).
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_KEY
+        generateValue: true
+
+      # ---- asked for once when the blueprint is applied; never stored in git ----
+      # WATI -> Connector -> API -> Create API Token. Must end with your own tenant id,
+      # e.g. https://live-mt-server.wati.io/123456
+      - key: WATI_BASE_URL
+        sync: false
+      - key: WATI_TOKEN
+        sync: false
+      # A secret you invent - WATI does not give you this one. Put ONLY the secret here, not the whole
+      # webhook address: the app builds `<PUBLIC_BASE_URL>/webhook/wati?token=<this>` around it.
+      - key: WATI_WEBHOOK_TOKEN
+        sync: false
+      # This service's own public address, e.g. https://order-status-bot.onrender.com
+      # Behind Render's proxy the app cannot work this out reliably, and a wrong guess means the
+      # webhook address handed to WATI is wrong.
+      - key: PUBLIC_BASE_URL
+        sync: false
+      # Shown to customers in the "contact us" and "could not verify" replies. Use a real one.
+      - key: SUPPORT_CONTACT
+        sync: false
+
+      # ---- optional; uncomment what you need ----
+      # Voice notes. Off by default because speech-to-text misreads digits, and looking up the wrong
+      # order is worse than asking the customer to type.
+      # - key: VOICE_NOTES
+      #   value: "true"
+      # - key: GROQ_API_KEY
+      #   sync: false
+      #
+      # Better understanding of unusual free text. Buttons and order numbers work without it.
+      # - key: OPENAI_API_KEY
+      #   sync: false
+      #
+      # Be told about failures without opening the dashboard.
+      # - key: ALERT_SLACK_WEBHOOK
+      #   sync: false
+      #
+      # Order and customer sources are normally set in the dashboard (Data sources), which saves them
+      # in the database. Set them here instead if you want them fixed by the blueprint.
+      # - key: ORDERS_SOURCE
+      #   value: http
+      # - key: ORDERS_API_URL
+      #   sync: false
+      # - key: ORDERS_API_KEY
+      #   sync: false
+      # - key: CUSTOMERS_SOURCE
+      #   value: dropbox
+      # - key: DROPBOX_APP_KEY
+      #   sync: false
+      # - key: DROPBOX_APP_SECRET
+      #   sync: false
+      # - key: DROPBOX_REFRESH_TOKEN
+      #   sync: false
+      #
+      # LOG_FILE is deliberately not set: Render captures stdout, and a log file on a disk that is
+      # wiped every deploy is thrown away. ALLOW_INSECURE_PROD is deliberately absent.
