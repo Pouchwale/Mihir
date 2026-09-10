@@ -327,8 +327,9 @@ class WatiClient:
                     break
         if not phone_number:
             raise WatiRejected(
-                "Tell us which WhatsApp business number to register - the one your customers message. WATI could not "
-                "be asked for it (it only documents creating webhooks, not listing them)."
+                "Tell us which WhatsApp business number to register - the one your customers message. Type it in "
+                "the box beside the Register webhook button. WATI could not be asked for it: this account does not "
+                "answer a request to list webhooks (WATI only documents creating them)."
             )
         body = [{"phoneNumber": phone_number, "status": 1, "url": url, "eventTypes": list(event_types)}]
         data = await self._post(WEBHOOK_ENDPOINTS, json=body)

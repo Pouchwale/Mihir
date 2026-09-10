@@ -421,3 +421,55 @@ async def test_a_401_that_cannot_be_confirmed_is_reported_honestly(live_wati):
         r = await wati.check()
     assert r["connected"] is False
     assert "Either the token is invalid" in r["detail"] and "scope" in r["detail"]
+
+
+@pytest.mark.asyncio
+async def test_the_dashboard_can_supply_the_number_the_listing_cannot(live_wati, monkeypatch):
+    """The whole point of the box beside the Register webhook button: this account 404s the listing,
+    so the number can only come from the owner."""
+    monkeypatch.setattr(get_settings(), "public_base_url", "https://bot.example.com")
+    monkeypatch.setattr(get_settings(), "wati_webhook_token", "k" * 32)
+    hook = f"{BASE}/api/v2/webhookEndpoints"
+    expected = f"https://bot.example.com/webhook/wati?token={'k' * 32}"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        with respx.mock(assert_all_called=False) as mock:
+            listing = mock.get(hook).mock(return_value=Response(404, text="not found"))
+            create = mock.post(hook).mock(return_value=Response(200, json={"ok": True, "result": []}))
+            # typed the way a person writes it, not the way WATI stores it
+            r = await c.post("/admin/api/wati/register-webhook",
+                             json={"phone_number": "+91 99999 99999"}, headers={"X-Admin-Key": "test-admin"})
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+    assert listing.call_count == 0  # asking would have 404'd; the number was given
+    assert json.loads(create.calls.last.request.content) == [
+        {"phoneNumber": "919999999999", "status": 1, "url": expected, "eventTypes": ["message"]}]
+
+
+@pytest.mark.asyncio
+async def test_a_number_that_is_clearly_not_one_is_refused_before_wati_sees_it(live_wati, monkeypatch):
+    monkeypatch.setattr(get_settings(), "public_base_url", "https://bot.example.com")
+    monkeypatch.setattr(get_settings(), "wati_webhook_token", "k" * 32)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        with respx.mock(assert_all_called=False) as mock:
+            create = mock.post(f"{BASE}/api/v2/webhookEndpoints").mock(return_value=Response(200, json={}))
+            r = await c.post("/admin/api/wati/register-webhook",
+                             json={"phone_number": "my number"}, headers={"X-Admin-Key": "test-admin"})
+    body = r.json()
+    assert body["ok"] is False and "country code" in body["detail"]
+    assert create.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_registering_uses_the_public_address_not_the_proxied_request(live_wati, monkeypatch):
+    """Behind Render's proxy the incoming request is plain http on an internal host. Validating that
+    instead of PUBLIC_BASE_URL rejected a correctly configured service with 'WATI only calls https'."""
+    monkeypatch.setattr(get_settings(), "public_base_url", "https://bot.example.com")
+    monkeypatch.setattr(get_settings(), "wati_webhook_token", "k" * 32)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://10.0.0.7:10000") as c:
+        with respx.mock(assert_all_called=False) as mock:
+            create = mock.post(f"{BASE}/api/v2/webhookEndpoints").mock(return_value=Response(200, json={"ok": True}))
+            r = await c.post("/admin/api/wati/register-webhook",
+                             json={"phone_number": "919999999999"}, headers={"X-Admin-Key": "test-admin"})
+    assert r.status_code == 200, r.text
+    assert json.loads(create.calls.last.request.content)[0]["url"].startswith("https://bot.example.com/")

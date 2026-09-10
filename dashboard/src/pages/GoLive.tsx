@@ -13,6 +13,11 @@ export default function GoLive() {
   const { data, error, loading, reload } = usePoll<Readiness>(() => api.readiness(true), 0);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // WATI does not offer a way to list webhooks on every account, so we often cannot discover which
+  // WhatsApp number to register - ask for it and remember it.
+  const [waNumber, setWaNumber] = useState(() => {
+    try { return localStorage.getItem("wa_business_number") || ""; } catch { return ""; }
+  });
 
   const run = async () => {
     setBusy(true);
@@ -48,7 +53,8 @@ export default function GoLive() {
     setBusy(true);
     setMsg(null);
     try {
-      const r = await api.registerWebhook();
+      try { localStorage.setItem("wa_business_number", waNumber); } catch { /* private mode */ }
+      const r = await api.registerWebhook(waNumber.trim());
       setMsg(r.ok ? r.detail : `Could not register it: ${r.detail}`);
       await reload();
     } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
@@ -73,10 +79,15 @@ export default function GoLive() {
             Apply .env changes
           </button>
           {hookMissing && (
-            <button className="btn-primary" disabled={busy || loading} onClick={registerWebhook}
-              title="Ask WATI to send incoming messages here (no WATI dashboard needed)">
-              Register webhook in WATI
-            </button>
+            <>
+              <input className="input font-mono w-52" placeholder="WhatsApp business number" value={waNumber}
+                onChange={(e) => setWaNumber(e.target.value)}
+                title="The number your customers message, exactly as WATI shows it" />
+              <button className="btn-primary" disabled={busy || loading} onClick={registerWebhook}
+                title="Ask WATI to send incoming messages here (no WATI dashboard needed)">
+                Register webhook in WATI
+              </button>
+            </>
           )}
           <button className="btn-ghost" disabled={busy || loading} onClick={selfTest}
             title="Call our own webhook address exactly as WATI would">

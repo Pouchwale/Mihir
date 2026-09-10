@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import re
 import uuid
 from datetime import timedelta
 
@@ -20,6 +21,7 @@ import structlog
 from ..services import alerts, intent, preflight, settings_store
 from ..services.state_machine import reset
 from ..services.wati import wati
+from ..utils.phone import normalize_phone
 from .health import status_payload
 from .webhook import enqueue
 
@@ -108,8 +110,29 @@ async def webhook_self_test(request: Request):
             "detail": f"The address answered {r.status_code}: {r.text[:200]}"}
 
 
+def _business_number(raw: str) -> tuple[str, str]:
+    """The WhatsApp business number as WATI writes it - digits only, no "+".
+
+    Blank is allowed: register_webhook then reuses whatever WATI already has, which works only on
+    accounts where WATI answers a GET on webhookEndpoints. normalize_phone assumes India, so a
+    number it rejects is not automatically wrong - fall back to the digits typed."""
+    text = raw.strip()
+    if not text:
+        return "", ""
+    pr = normalize_phone(text)
+    if pr.ok:
+        return pr.phone or "", ""
+    digits = re.sub(r"\D+", "", text)
+    if not 8 <= len(digits) <= 15:
+        return "", (f"'{text}' does not look like a WhatsApp business number. Enter it with the country code "
+                    "and no spaces, exactly as WATI shows it, e.g. 919876543210.")
+    return digits, ""
+
+
 class WebhookIn(BaseModel):
-    phone_number: str = ""  # your WhatsApp business number; blank = reuse what WATI already has
+    # Your WhatsApp business number. Blank means "reuse whatever WATI already has registered", which
+    # only works on accounts where WATI answers a GET on webhookEndpoints - many do not.
+    phone_number: str = ""
 
 
 @api.post("/wati/register-webhook")
@@ -125,8 +148,11 @@ async def register_wati_webhook(request: Request, body: WebhookIn):
     problem = preflight.hook_url_problem(s, str(request.base_url))
     if problem:
         raise HTTPException(400, problem)
+    number, bad = _business_number(body.phone_number)
+    if bad:
+        return {"ok": False, "detail": bad, "url": url}
     try:
-        result = await wati.register_webhook(url, body.phone_number)
+        result = await wati.register_webhook(url, number)
     except Exception as e:  # noqa: BLE001 - report it, never 500 the dashboard
         return {"ok": False, "detail": str(e), "url": url}
     return {"ok": True, "url": url, "detail": f"WATI will now post incoming messages to {url}", "result": result}
