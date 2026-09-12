@@ -75,6 +75,8 @@ _F = [
     Field("agent_handover_hours", "conversation", "int", min=0, max=720),
     Field("session_timeout_min", "conversation", "int", min=1, max=1440),
     Field("so_menu_style", "conversation", "choice", choices=("auto", "list")),
+    Field("repeat_limit", "conversation", "int", min=0, max=20),
+    Field("repeat_action", "conversation", "choice", choices=("end", "person")),
     # ---- AI (Groq) ----
     Field("groq_api_key", "ai", "str", secret=True),
     Field("ai_builder_model", "ai", "str"),

@@ -83,7 +83,8 @@ async def run() -> SyncRun:
             async with session_scope() as db:
                 await db.execute(delete(OrderCache))
                 db.add_all(
-                    OrderCache(so_no=r.so_no, po_no=r.po_no, fg_item_code=r.fg_item_code, customer_name=r.customer_name,
+                    OrderCache(so_no=r.so_no, po_no=r.po_no, fg_item_code=r.fg_item_code,
+                               fg_description=r.fg_description, customer_name=r.customer_name,
                                connection_status=r.connection_status, real_status=r.real_status, fetched_at=now)
                     for r in mr.rows
                 )

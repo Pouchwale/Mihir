@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..models import Session, utcnow
-from . import menus, templates
+from . import menus, repeat, templates
 from .intent import Parsed
 from .menus import Options
 from .replies import ReplyContext
@@ -287,6 +287,11 @@ async def _lookup_fg(db, session, customer, fg_code, ctx, lang) -> Outcome:
 
 def _deliver(session, row, multi: bool, ctx, lang) -> Outcome:
     """The one message that carries order data: only real_status, never connection_status."""
+    if repeat.too_many(repeat.note(session, f"{row.so_no}/{row.fg_item_code or ''}")):
+        # the same order, again and again: repeating the status is no answer, so say so and stop
+        so, fg = row.so_no, row.fg_item_code
+        reset(session)
+        return Outcome("too_many_repeats", ctx(so_no=so, fg_code=fg), "repeat_stopped", lang)
     session.step = "DONE"
     session.fg_code = row.fg_item_code
     session.attempts = 0

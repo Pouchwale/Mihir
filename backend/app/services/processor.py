@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..models import MessageLog, utcnow
-from . import alerts, handover, intent, rate_limit, replies, stt
+from . import alerts, handover, intent, rate_limit, replies, repeat, stt
 from .menus import Options
 from .state_machine import get_or_create_session, step
 from .wati import wati
@@ -163,6 +163,9 @@ async def process_payload(db: AsyncSession, payload: dict, message_log_id: int |
         for outcome in outcomes:
             if outcome.code == "menu":  # live workflows can add their own row to the main menu
                 outcome.options = await workflows.main_menu(outcome.options, outcome.language, phone, db)
+            if outcome.code == "repeat_stopped" and repeat.hand_to_person():
+                # asked the same thing once too often: your team takes it from here, and the bot is quiet
+                await handover.start(db, phone, "", "the same request over and over")
             reply = replies.build(outcome.template, outcome.ctx, outcome.language)
             await wati.send_options(phone, reply, outcome.options)
             await _log_out(db, phone, reply, outcome.code, session.step, outcome.options)

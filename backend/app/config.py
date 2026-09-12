@@ -5,11 +5,11 @@ import json
 import time
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 ENV_FILE = BACKEND_DIR / ".env"
@@ -22,6 +22,7 @@ DEFAULT_COLUMN_MAP = {
     "so_no": "SO No",
     "po_no": "PO No",
     "fg_item_code": "FG Item Code",
+    "fg_description": "FG Description",
     "customer_name": "Customer Name",
     "connection_status": "Connection Status",
     "real_status": "Real Status (PPC)",
@@ -115,7 +116,10 @@ class Settings(BaseSettings):
     orders_sheet: str = ""
     orders_sql_url: str = ""
     orders_sql_query: str = ""
-    orders_column_map: dict[str, str] = DEFAULT_COLUMN_MAP.copy()
+    # NoDecode: the raw text reaches the validator below, so an empty or half-typed ORDERS_COLUMN_MAP
+    # is a clear message rather than a crash at boot - on a hosted service that is a service that
+    # never comes back up, over a value someone cleared in a web form.
+    orders_column_map: Annotated[dict[str, str], NoDecode] = DEFAULT_COLUMN_MAP.copy()
     order_refresh_minutes: int = 5
     orders_stale_minutes: int = 30
 
@@ -124,6 +128,12 @@ class Settings(BaseSettings):
     session_timeout_min: int = 30
     # How SO / item choices are shown: auto = buttons when 3 or fewer, list otherwise; list = always a list
     so_menu_style: Literal["auto", "list"] = "auto"
+    # A customer asking the same thing over and over is not being served: the answer is not going to
+    # change by being asked again. After this many identical requests in a row the bot stops and says
+    # so, rather than repeating itself. 0 = never stop.
+    repeat_limit: int = 3
+    # ...and what "stop" means: end the conversation, or quieten the bot and let your team take over.
+    repeat_action: Literal["end", "person"] = "end"
     fg_max_attempts: int = 2
     rate_limit_msgs: int = 20
     rate_limit_window_min: int = 10
@@ -175,11 +185,18 @@ class Settings(BaseSettings):
     @field_validator("orders_column_map", mode="before")
     @classmethod
     def _parse_map(cls, v):
+        """The column map, filled in from the defaults for anything it does not mention.
+
+        A map written before a column existed would otherwise leave that column silently unread -
+        the value is simply never there, and nothing says why. A column the owner deliberately does
+        not want is mapped to "" rather than left out, and that is honoured."""
         if isinstance(v, str):
             v = v.strip()
             if not v:
                 return DEFAULT_COLUMN_MAP.copy()
-            return json.loads(v)
+            v = json.loads(v)
+        if isinstance(v, dict):
+            return {**DEFAULT_COLUMN_MAP, **{k: val for k, val in v.items() if k in DEFAULT_COLUMN_MAP}}
         return v
 
     # ---- derived ----

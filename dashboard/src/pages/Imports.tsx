@@ -7,8 +7,37 @@ type Tab = "history" | "orders" | "customers";
 
 const COLUMN_LABELS: Record<string, string> = {
   so_no: "Order number (SO)", po_no: "Customer PO number", fg_item_code: "Item code (FG)",
+  fg_description: "Item description (shown to the customer)",
   customer_name: "Customer name", connection_status: "Connection status (internal)", real_status: "Real status (sent to customer)",
 };
+
+const CUSTOMER_COLUMNS = ["customers_col_contact", "customers_col_name", "customers_col_code"];
+const CUSTOMER_REQUIRED = ["customers_col_contact", "customers_col_name"];
+const CUSTOMER_LABELS: Record<string, string> = {
+  customers_col_contact: "WhatsApp number",
+  customers_col_name: "Customer name (must match the PPC table exactly)",
+  customers_col_code: "Customer code",
+};
+
+/** The columns to show now: the required ones, whatever is mapped, and anything just added by hand.
+ *  A column nobody uses is noise on this page, so an unmapped optional one is offered rather than
+ *  listed. */
+function shownColumns(all: string[], required: string[], mapped: (k: string) => boolean, added: string[]) {
+  return all.filter((k) => required.includes(k) || mapped(k) || added.includes(k));
+}
+
+function AddColumn({ options, labels, onAdd }: {
+  options: string[]; labels: Record<string, string>; onAdd: (k: string) => void;
+}) {
+  if (options.length === 0) return null;
+  return (
+    <select className="input text-sm w-full mt-2" value="" aria-label="Add a column"
+      onChange={(e) => e.target.value && onAdd(e.target.value)}>
+      <option value="">+ Add a column…</option>
+      {options.map((k) => <option key={k} value={k}>{labels[k] || k}</option>)}
+    </select>
+  );
+}
 
 export default function Imports() {
   const [tab, setTab] = useState<Tab>("history");
@@ -103,6 +132,7 @@ function OrdersConnection() {
   const headers = test?.headers ?? [];
   const map = f.obj<Record<string, string>>("orders_column_map", {});
   const setMap = (k: string, v: string) => f.set("orders_column_map", { ...map, [k]: v });
+  const [added, setAdded] = useState<string[]>([]);
 
   const runTest = async () => {
     f.setBusy(true); f.setMsg(null);
@@ -218,17 +248,34 @@ function OrdersConnection() {
 
         <div className="border-t border-slate-100 pt-3">
           <div className="font-medium text-sm mb-1">Match the columns</div>
-          <p className="text-xs text-slate-500 mb-2">Tell the bot which column in your table means what. The first three are required.</p>
+          <p className="text-xs text-slate-500 mb-2">
+            Tell the bot which column in your table means what. The three marked * are required; add the others
+            when your table has them, and remove one the bot should ignore.
+          </p>
           <div className="space-y-2">
-            {f.data.column_fields.map((k) => (
-              <div key={k} className="grid grid-cols-2 gap-2 items-center">
-                <div className="text-sm">{COLUMN_LABELS[k] || k}{f.data!.required_columns.includes(k) && <span className="text-rose-600"> *</span>}</div>
-                <ColumnPicker value={map[k] || ""} headers={headers} onChange={(v) => setMap(k, v)} required={f.data!.required_columns.includes(k)} />
-              </div>
-            ))}
+            {shownColumns(f.data.column_fields, f.data.required_columns, (k) => !!(map[k] ?? "").trim(), added).map((k) => {
+              const required = f.data!.required_columns.includes(k);
+              return (
+                <div key={k} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
+                  <div className="text-sm">{COLUMN_LABELS[k] || k}{required && <span className="text-rose-600"> *</span>}</div>
+                  <ColumnPicker value={map[k] || ""} headers={headers} onChange={(v) => setMap(k, v)} required={required} />
+                  {required ? <span className="w-8" /> : (
+                    <button className="btn-ghost !h-8 !w-8 !px-0 text-rose-600" title={`Remove ${COLUMN_LABELS[k] || k}`}
+                      aria-label={`Remove ${COLUMN_LABELS[k] || k}`}
+                      onClick={() => { setMap(k, ""); setAdded((a) => a.filter((x) => x !== k)); }}>✕</button>
+                  )}
+                </div>
+              );
+            })}
           </div>
+          <AddColumn labels={COLUMN_LABELS} onAdd={(k) => setAdded((a) => [...a, k])}
+            options={f.data.column_fields.filter((k) => !f.data!.required_columns.includes(k)
+              && !(map[k] ?? "").trim() && !added.includes(k))} />
           {f.errors.orders_column_map && <div className="text-xs text-rose-600 mt-1">{f.errors.orders_column_map}</div>}
-          <div className="text-xs text-slate-500 mt-2">Connection status stays inside the system — it is never sent to a customer.</div>
+          <div className="text-xs text-slate-500 mt-2">
+            The item description is what a customer reads next to an item code, so a workflow can show
+            "FG-2001 — Spice pouch 200g". Connection status stays inside the system — it is never sent to a customer.
+          </div>
         </div>
 
         {test?.sample?.length ? (
@@ -256,6 +303,7 @@ function CustomersConnection() {
 
   const source = f.str("customers_source", "local");
   const headers = test?.headers ?? [];
+  const [added, setAdded] = useState<string[]>([]);
   const cron = f.str("customer_sync_cron", "10 6 * * *");
   const daily = CRON_DAILY.exec(cron);
   const time = daily ? `${daily[2].padStart(2, "0")}:${daily[1].padStart(2, "0")}` : "";
@@ -360,14 +408,30 @@ function CustomersConnection() {
 
         <div className="border-t border-slate-100 pt-3">
           <div className="font-medium text-sm mb-1">Match the columns</div>
+          <p className="text-xs text-slate-500 mb-2">
+            The number and the name are required — without them there is nobody to answer, and no name to match
+            orders on. The customer code is optional: add it if your list has one, remove it if it does not.
+          </p>
           <div className="space-y-2">
-            {[["customers_col_code", "Customer code"], ["customers_col_name", "Customer name (must match the PPC table exactly)"], ["customers_col_contact", "WhatsApp number"]].map(([k, label]) => (
-              <div key={k} className="grid grid-cols-2 gap-2 items-center">
-                <div className="text-sm">{label}<span className="text-rose-600"> *</span></div>
-                <ColumnPicker value={f.str(k, "")} headers={headers} onChange={(v) => f.set(k, v)} required error={f.errors[k]} />
-              </div>
-            ))}
+            {shownColumns(CUSTOMER_COLUMNS, CUSTOMER_REQUIRED, (k) => !!f.str(k, "").trim(), added).map((k) => {
+              const required = CUSTOMER_REQUIRED.includes(k);
+              return (
+                <div key={k} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
+                  <div className="text-sm">{CUSTOMER_LABELS[k]}{required && <span className="text-rose-600"> *</span>}</div>
+                  <ColumnPicker value={f.str(k, "")} headers={headers} onChange={(v) => f.set(k, v)}
+                    required={required} error={f.errors[k]} />
+                  {required ? <span className="w-8" /> : (
+                    <button className="btn-ghost !h-8 !w-8 !px-0 text-rose-600" title={`Remove ${CUSTOMER_LABELS[k]}`}
+                      aria-label={`Remove ${CUSTOMER_LABELS[k]}`}
+                      onClick={() => { f.set(k, ""); setAdded((a) => a.filter((x) => x !== k)); }}>✕</button>
+                  )}
+                </div>
+              );
+            })}
           </div>
+          <AddColumn labels={CUSTOMER_LABELS} onAdd={(k) => setAdded((a) => [...a, k])}
+            options={CUSTOMER_COLUMNS.filter((k) => !CUSTOMER_REQUIRED.includes(k) && !f.str(k, "").trim()
+              && !added.includes(k))} />
         </div>
 
         {test?.sample?.length ? (

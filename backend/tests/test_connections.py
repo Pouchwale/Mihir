@@ -210,3 +210,64 @@ async def test_test_endpoints_use_the_draft_and_save_nothing(clean_settings):
         # an invalid draft is reported, not raised
         r = (await c.post("/admin/api/connections/orders/test", headers=H, json={"values": {"orders_source": "nope"}})).json()
         assert r["ok"] is False and "orders_source" in r["error"]
+
+
+def test_a_column_map_written_before_a_column_existed_still_reads_it():
+    """The item description was added after this owner wrote their map. A column they never
+    mentioned must not go quietly unread - the value would simply never be there, with nothing
+    saying why. One they deliberately switched off stays off."""
+    from app.config import DEFAULT_COLUMN_MAP, Settings
+
+    older = {k: v for k, v in DEFAULT_COLUMN_MAP.items() if k != "fg_description"}
+    filled = Settings(orders_column_map=json.dumps(older))
+    assert filled.orders_column_map["fg_description"] == DEFAULT_COLUMN_MAP["fg_description"]
+
+    off = Settings(orders_column_map=json.dumps({**older, "fg_description": ""}))
+    assert off.orders_column_map["fg_description"] == ""
+
+
+def test_a_broken_column_map_in_the_environment_is_a_message_not_a_dead_service(monkeypatch):
+    """A hosted service that will not boot is the worst way to learn about a typo in a web form."""
+    import pydantic
+
+    from app.config import DEFAULT_COLUMN_MAP, Settings
+
+    monkeypatch.setenv("ORDERS_COLUMN_MAP", "")
+    assert Settings().orders_column_map == DEFAULT_COLUMN_MAP  # cleared: back to the defaults
+
+    monkeypatch.setenv("ORDERS_COLUMN_MAP", "SO No, PO No")
+    with pytest.raises(pydantic.ValidationError, match="orders_column_map"):
+        Settings()
+
+
+def test_a_customer_list_with_no_code_column_still_imports():
+    """Plenty of customer lists have no code at all. The number and the name are what the bot
+    needs; refusing the whole list over a column it never uses helps nobody."""
+    import io
+
+    from openpyxl import Workbook
+
+    from app.jobs.customer_sync import parse_customers
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Contact", "Customer Name"])
+    ws.append(["918888888888", "No Code Traders"])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    s = get_settings().model_copy(update={"customers_col_code": "", "customers_col_name": "Customer Name",
+                                          "customers_col_contact": "Contact"})
+    accepted, rejected, headers, warnings = parse_customers(buf.getvalue(), s)
+    assert rejected == [] and [c.customer_name for c in accepted] == ["No Code Traders"]
+    assert accepted[0].customer_code is None
+
+    # a code column that IS named but absent is a warning: the import still happens
+    named = s.model_copy(update={"customers_col_code": "Customer Code"})
+    accepted, rejected, headers, warnings = parse_customers(buf.getvalue(), named)
+    assert [c.customer_name for c in accepted] == ["No Code Traders"]
+    assert any("Customer Code" in w for w in warnings)
+
+    # the number and the name are not optional - without them there is nobody to answer
+    with pytest.raises(ValueError, match="missing column"):
+        parse_customers(buf.getvalue(), s.model_copy(update={"customers_col_contact": "Mobile"}))

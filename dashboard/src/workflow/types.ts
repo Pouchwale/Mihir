@@ -49,6 +49,8 @@ export interface WfInput {
   options?: WfOption[];
   /** data_list: the Find-in-your-data step whose rows this shows, and what each row reads */
   from?: string;
+  /** buttons for two or three rows, a list beyond that ("auto"), or always one of them */
+  show?: "auto" | "list" | "buttons";
   title_field?: string;
   description_field?: string;
   section_field?: string;
@@ -737,7 +739,7 @@ export const DATA_LIST_LINE = "SO {so_no} - {real_status}";
  *  follow the owner's column map, which is why those are fetched. connection_status is not here:
  *  it is the internal status and never reaches a customer. Mirrors schema.DATA_FIELDS. */
 export const DATA_FIELDS: Record<string, string[]> = {
-  orders: ["so_no", "po_no", "fg_item_code", "real_status", "customer_name"],
+  orders: ["so_no", "po_no", "fg_item_code", "fg_description", "real_status", "customer_name"],
   customer: ["customer_code", "customer_name"],
 };
 /** Fields no two rows share, so a customer can tell one row from another. */

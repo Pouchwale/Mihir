@@ -12,7 +12,9 @@ import httpx
 import structlog
 from sqlalchemy import delete, func, select
 
-from ..adapters.orders_base import resolve_headers
+# _norm_header is shared on purpose: "Customer  Name" must match a header the same way here as it
+# does for the order table, or the two pages would disagree about what counts as the same column.
+from ..adapters.orders_base import _norm_header
 from ..adapters.parsers import excel_table
 from ..config import get_settings
 from ..db import session_scope
@@ -70,13 +72,32 @@ async def fetch_excel(s) -> tuple[bytes, str]:
 
 # ---------------- parsing ----------------
 def _resolve(headers: list[str], s) -> tuple[dict[str, str], list[str]]:
-    cmap = {"so_no": s.customers_col_contact, "customer_name": s.customers_col_name, "real_status": s.customers_col_code}
-    # reuse the generic resolver: contact / name / code map onto its three required slots
-    resolved, warnings, missing = resolve_headers(headers, cmap)
+    """Which header holds the phone, the name and (if there is one) the customer code.
+
+    The phone and the name are not optional - without them there is nobody to answer and no name to
+    match orders on. The code is: plenty of customer lists have none, and refusing to import 500
+    customers over a column the bot never needs helps nobody. A code column that is named but not in
+    the file is a warning, so the import still happens and the owner is told what was ignored."""
+    normed = {_norm_header(h): h for h in headers}
+
+    def find(wanted: str) -> str:
+        if not wanted:
+            return ""
+        return wanted if wanted in headers else normed.get(_norm_header(wanted), "")
+
+    cols = {"contact": find(s.customers_col_contact), "name": find(s.customers_col_name),
+            "code": find(s.customers_col_code)}
+    warnings: list[str] = []
+    missing = [wanted for key, wanted in (("contact", s.customers_col_contact), ("name", s.customers_col_name))
+               if not cols[key]]
     if missing:
-        names = {"so_no": s.customers_col_contact, "customer_name": s.customers_col_name, "real_status": s.customers_col_code}
-        raise ValueError("missing column(s): " + ", ".join(names[m] for m in missing) + f". Headers seen: {headers}")
-    return {"contact": resolved["so_no"], "name": resolved["customer_name"], "code": resolved["real_status"]}, warnings
+        raise ValueError("missing column(s): " + ", ".join(missing) + f". Headers seen: {headers}")
+    for key, wanted in (("contact", s.customers_col_contact), ("name", s.customers_col_name)):
+        if cols[key] != wanted:
+            warnings.append(f"column '{wanted}' matched '{cols[key]}' case/space-insensitively")
+    if s.customers_col_code and not cols["code"]:
+        warnings.append(f"optional column '{s.customers_col_code}' (customer code) not found")
+    return cols, warnings
 
 
 def parse_customers(body: bytes, s=None) -> tuple[list[Customer], list[dict], list[str], list[str]]:
@@ -95,7 +116,7 @@ def parse_customers(body: bytes, s=None) -> tuple[list[Customer], list[dict], li
     for i, r in enumerate(raw, start=2):  # Excel row number (1 = header)
         raw_contact = r.get(cols["contact"])
         name = r.get(cols["name"])
-        code = r.get(cols["code"])
+        code = r.get(cols["code"]) if cols["code"] else None
         name_s = None if name is None else str(name)  # EXACT, no strip
         if isinstance(code, float) and code.is_integer():
             code = int(code)

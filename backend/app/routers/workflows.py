@@ -224,6 +224,7 @@ async def data_fields():
              "fields": [field("so_no", columns.get("so_no", "SO No")),
                         field("po_no", columns.get("po_no", "PO No")),
                         field("fg_item_code", columns.get("fg_item_code", "FG Item Code")),
+                        field("fg_description", columns.get("fg_description", "FG Description")),
                         field("real_status", columns.get("real_status", "Real Status"), statuses),
                         field("customer_name", columns.get("customer_name", "Customer Name"))]},
             {"value": "customer", "label": "Their record in your customer list",

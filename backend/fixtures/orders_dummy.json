@@ -4,6 +4,7 @@
       "SO No": "45231",
       "PO No": "PO-7781",
       "FG Item Code": "FG-1001",
+      "FG Description": "Stand-up pouch 500g, matte, zipper",
       "Customer Name": "Shree Packaging Pvt Ltd",
       "Connection Status": "CONN-PLANT-A-OK",
       "Real Status (PPC)": "In Production"
@@ -12,6 +13,7 @@
       "SO No": "45232",
       "PO No": "PO-7782",
       "FG Item Code": "FG-1002",
+      "FG Description": "Stand-up pouch 1kg, gloss",
       "Customer Name": "Shree Packaging Pvt Ltd",
       "Connection Status": "CONN-PLANT-A-OK",
       "Real Status (PPC)": "Dispatched"
@@ -20,6 +22,7 @@
       "SO No": "45240",
       "PO No": "PO-8801",
       "FG Item Code": "FG-2001",
+      "FG Description": "Spice pouch 200g, matte",
       "Customer Name": "Mehta Foods",
       "Connection Status": "CONN-PLANT-B-OK",
       "Real Status (PPC)": "Ready for Dispatch"
@@ -28,6 +31,7 @@
       "SO No": "45240",
       "PO No": "PO-8801",
       "FG Item Code": "FG-2002",
+      "FG Description": "Spice pouch 500g, gloss",
       "Customer Name": "Mehta Foods",
       "Connection Status": "CONN-PLANT-B-OK",
       "Real Status (PPC)": "Printing"
@@ -36,6 +40,7 @@
       "SO No": "45240",
       "PO No": "PO-8801",
       "FG Item Code": "FG-2003",
+      "FG Description": "Namkeen pouch 1kg, metallised",
       "Customer Name": "Mehta Foods",
       "Connection Status": "CONN-PLANT-B-DELAY",
       "Real Status (PPC)": "Awaiting Material"
@@ -44,6 +49,7 @@
       "SO No": "45250",
       "PO No": "PO-9901",
       "FG Item Code": "FG-3001",
+      "FG Description": "Shrink sleeve, 500ml bottle",
       "Customer Name": "Gujarat Polymers",
       "Connection Status": "CONN-PLANT-A-OK",
       "Real Status (PPC)": "Lamination"
@@ -52,6 +58,7 @@
       "SO No": "45250",
       "PO No": "PO-9901",
       "FG Item Code": "FG-3002",
+      "FG Description": "Shrink sleeve, 1L bottle",
       "Customer Name": "Gujarat Polymers",
       "Connection Status": "CONN-PLANT-A-OK",
       "Real Status (PPC)": "Slitting"
@@ -60,6 +67,7 @@
       "SO No": "45260",
       "PO No": "PO-5555",
       "FG Item Code": "FG-4001",
+      "FG Description": "Fertiliser bag 5kg, BOPP",
       "Customer Name": "Patel Agro Industries ",
       "Connection Status": "CONN-PLANT-C-OK",
       "Real Status (PPC)": "Cylinder Making"
@@ -68,6 +76,7 @@
       "SO No": "45270",
       "PO No": "PO-6666",
       "FG Item Code": "FG-5001",
+      "FG Description": "Tablet strip label, 40x60mm",
       "Customer Name": "SUNRISE PHARMA",
       "Connection Status": "CONN-PLANT-C-OK",
       "Real Status (PPC)": "Quality Check"
@@ -76,6 +85,7 @@
       "SO No": "45280",
       "PO No": "PO-7777",
       "FG Item Code": "FG-6001",
+      "FG Description": "Garment label roll, satin",
       "Customer Name": "Royal Textiles",
       "Connection Status": "CONN-PLANT-B-OK",
       "Real Status (PPC)": "Delivered"

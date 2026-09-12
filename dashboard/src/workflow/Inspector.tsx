@@ -792,9 +792,23 @@ function DataListPanel({ node, doc, input, setInput, lang, sideBySide }: {
           Add a <b>Find in your data</b> step before this question - it is what finds the rows to show.
         </div>
       )}
+      <label className="block space-y-1">
+        <span className="text-[11px] text-slate-500">Show them as</span>
+        <select className="input w-full text-xs" value={input.show ?? "auto"} aria-label="Show them as"
+          onChange={(e) => setInput({ show: e.target.value as "auto" })}>
+          <option value="auto">Buttons for up to 3, a list beyond that</option>
+          <option value="list">Always a list</option>
+          <option value="buttons">Always buttons (only the first 3)</option>
+        </select>
+      </label>
       {pick("Each row reads", "title_field", "Choose a field…")}
       {pick("Smaller line under it (optional)", "description_field", "Nothing")}
       {pick("Group rows under (optional)", "section_field", "No grouping")}
+      {(input.show ?? "auto") !== "list" && (input.description_field ?? "") && (
+        <div className="text-[11px] text-amber-800">
+          Buttons show the title only, so the smaller line is not shown when there are three or fewer rows.
+        </div>
+      )}
       <Field label="List button" path="input.button_text" value={input.button_text}
         onChange={(button_text) => setInput({ button_text })} lang={lang} max={LIMITS.listButton} sideBySide={sideBySide} />
       <div className="text-[11px] text-slate-500">

@@ -17,7 +17,7 @@ from ..intent import regex_parse
 from ..templates import norm_trigger
 from .schema import (AI_ANSWER_MAX, AI_ANSWER_MIN, AI_FAQ_MAX, AI_TONES, CHAT_STATUSES, CONDITION_OPS,
                      DATA_FINDS, DATA_GROUPS, DATA_KEY_FIELDS, DATA_OPS, DATA_ROWS_MAX, DATA_SORTS,
-                     DATA_SOURCES, DELAY_MAX_SEC, HTTP_METHODS, INPUT_KINDS, WAITING_TYPES,
+                     DATA_SHOW, DATA_SOURCES, DELAY_MAX_SEC, HTTP_METHODS, INPUT_KINDS, WAITING_TYPES,
                      LANGS, MEDIA_TYPES, NODE_TYPES, SYSTEM_VARS, VALIDATE_TYPES, _NODE_ID, _VAR_NAME,
                      LANGUAGE_NAMES, LOOKUP_SOURCES, Issue, answer_extras, data_answer_extras, data_fields,
                      data_node_of, data_vars, language_label, offered_languages,
@@ -704,6 +704,9 @@ def _check_data_list(nid: str, node: dict, spec: dict, issues: list[Issue], by_i
             problem = _field_problem(nid, name, got, fields, where)
             if problem:
                 issues.append(problem)
+    if str(spec.get("show") or "auto") not in DATA_SHOW:
+        issues.append(Issue("fail", f"{name} must show its rows as buttons, as a list, or automatically.",
+                            nid, "input.show"))
     if title in fields and title not in DATA_KEY_FIELDS:
         issues.append(Issue("warn", f'{name} shows "{title}" on every row. Two orders reading the same cannot be '
                                     "told apart, so one of them is left out - a number like the SO is safer.", nid))

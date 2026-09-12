@@ -32,6 +32,7 @@ from ...config import get_settings
 from ...db import session_scope
 from ...models import MessageLog, NewCustomer, Session, Workflow, WorkflowRun, WorkflowVersion, utcnow
 from .. import alerts, handover, menus, replies
+from .. import repeat
 from ..intent import Parsed, regex_parse
 from ..templates import button_phrases, norm_trigger, trigger_matches
 from ..ai import live as ai_live
@@ -243,6 +244,20 @@ class _Conv:
         self.sent.append(msg)
 
 
+async def _stop_repeating(conv: _Conv, run: WorkflowRun, wf: LiveWorkflow, language: str) -> Handled:
+    """Say once that the answer is not going to change, and let the customer out of the workflow."""
+    _finish(run, "the same answer over and over")
+    repeat.clear(conv.session)
+    text = replies.build("too_many_repeats", replies.ReplyContext(
+        support=get_settings().support_contact, customer_name=conv.system.get("sys.customer_name", "")), language)
+    await conv.say(engine.Message(text=text), wf.key)
+    if repeat.hand_to_person():
+        await handover.start(conv.db, conv.phone, "", f"going round in circles in “{wf.title}”")
+        conv.handed_over = True
+    log.info("workflow_repeat_stopped", phone=conv.phone, workflow=wf.key)
+    return Handled(wf.key, conv.sent)
+
+
 def step_label(key: str) -> str:
     """What the chat log shows as the step: which workflow answered."""
     return f"WF:{key}"[:20]
@@ -297,6 +312,10 @@ async def _route(conv: _Conv, run: WorkflowRun | None, live: list[LiveWorkflow],
         else:
             graph = await registry.graph(run.workflow_key, run.version, conv.db) or wf.graph
             state = engine.RunState.from_dict(_loads(run.state))
+            # The same answer to the same question, over and over: the workflow is going round in a
+            # circle it cannot get out of, and repeating it is no help to anybody.
+            if repeat.too_many(repeat.note(conv.session, f"{wf.key}:{state.node}:{said}")):
+                return await _stop_repeating(conv, run, wf, state.language)
             if state.finished:
                 _finish(run, "already finished")
             elif engine.understands(graph, state, said, conv.media):

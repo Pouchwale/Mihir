@@ -18,6 +18,18 @@ from tests.flow import SHREE, open_menu
 H = {"X-Admin-Key": "test-admin"}
 
 
+@pytest.fixture(autouse=True)
+def _no_repeat_guard():
+    """These tests ask for the same order several times to watch the buttons change. A real customer
+    doing that is going in circles and the bot stops them (services/repeat.py); here it is the point."""
+    from app.config import apply_overrides, overrides
+
+    before = overrides()
+    apply_overrides({**before, "repeat_limit": 0})
+    yield
+    apply_overrides(before)
+
+
 @pytest.fixture
 async def clean_templates():
     async with session_scope() as db:

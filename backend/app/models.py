@@ -28,6 +28,7 @@ class OrderCache(Base):
     so_no: Mapped[str] = mapped_column(String(50), index=True)
     po_no: Mapped[str | None] = mapped_column(String(50), index=True)
     fg_item_code: Mapped[str | None] = mapped_column(String(50))
+    fg_description: Mapped[str | None] = mapped_column(String(255))  # what the item IS, for a customer to read
     customer_name: Mapped[str] = mapped_column(String(255), index=True)  # EXACTLY as returned by source
     connection_status: Mapped[str | None] = mapped_column(String(100))  # internal only, never sent
     real_status: Mapped[str | None] = mapped_column(String(100))  # the only field shown to customer
@@ -49,6 +50,9 @@ class Session(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     language: Mapped[str] = mapped_column(String(5), default="en")
     lang_chosen: Mapped[bool] = mapped_column(Boolean, default=False)  # picked from the language buttons this window
+    # the same request, over and over: what it was, and how many times in a row (services/repeat.py)
+    repeat_key: Mapped[str | None] = mapped_column(String(120))
+    repeat_count: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 

@@ -19,7 +19,7 @@ from typing import Any
 from .. import menus
 from ..templates import norm_trigger, trigger_matches
 from . import actions as act
-from .schema import (ACTION_TYPES, AI_ANSWER_MAX, DATA_FIELDS_MAX, DATA_LIST_LINE, DATA_ROWS_MAX,
+from .schema import (ACTION_TYPES, AI_ANSWER_MAX, DATA_FIELDS_MAX, DATA_LIST_LINE, DATA_ROWS_MAX, DATA_SHOW,
                      DATA_SETS_MAX, DATA_VALUE_MAX, DELAY_MAX_SEC, LANGS, MAX_MESSAGES_PER_TURN,
                      MAX_VISITS_PER_TURN,
                      FILE_ANSWERS, LANGUAGE_NAMES, WAITING_TYPES, Graph, branch_port, language_label,
@@ -554,6 +554,8 @@ def _sections(node: dict, state: RunState) -> list[dict] | None:
     spec = node.get("input") or {}
     if spec.get("kind") not in ("list", "data_list"):
         return None
+    if spec.get("kind") == "data_list" and _data_kind(spec, len(_options_of(node, state))) == "buttons":
+        return None
     lang = state.language
     fallback = render(text_of(spec.get("section_title"), lang), state)
     groups: list[dict] = []
@@ -826,11 +828,13 @@ def _options_of(node: dict, state: RunState) -> list[dict]:
     if spec.get("kind") != "data_list":
         return [o for o in (spec.get("options") or []) if isinstance(o, dict)]
     got = state.data.get(str(spec.get("from") or "")) or {}
+    rows = [r for r in got.get("rows") or [] if isinstance(r, dict)]
+    # Cut the title here, to exactly what the customer will see: a tap sends back the text on the
+    # button, so matching against the uncut title would quietly ignore it.
+    cap = menus.BUTTON_TEXT_MAX if _data_kind(spec, len(rows)) == "buttons" else menus.ROW_TITLE_MAX
     out: list[dict] = []
-    for row in got.get("rows") or []:
-        if not isinstance(row, dict):
-            continue
-        title = str(row.get(str(spec.get("title_field") or "")) or "").strip()
+    for row in rows:
+        title = menus._cut(str(row.get(str(spec.get("title_field") or "")) or ""), cap)
         if title:
             # The title is what the phone sends back when they tap, so it is also the value. A
             # customer who types instead gets the same row: an order is known by its numbers, and
@@ -845,8 +849,19 @@ def _options_of(node: dict, state: RunState) -> list[dict]:
     return out
 
 
+def _data_kind(spec: dict, rows: int) -> str:
+    """Buttons or a list. "auto" follows the order-status bot: two or three choices are buttons,
+    which a customer can tap without opening anything; more than that has to be a list."""
+    show = str(spec.get("show") or "auto")
+    if show not in DATA_SHOW:
+        show = "auto"
+    if show == "auto":
+        return "buttons" if 0 < rows <= menus.BUTTONS_MAX else "list"
+    return show
+
+
 def _data_options(node: dict, state: RunState) -> menus.Options | None:
-    """The rows a data step found, as a WhatsApp list. When some were left out the footer says so -
+    """The rows a data step found, as a WhatsApp menu. When some were left out the footer says so -
     a customer whose order is missing from the list must know they can still type its number."""
     spec = node.get("input") or {}
     lang = state.language
@@ -859,7 +874,7 @@ def _data_options(node: dict, state: RunState) -> menus.Options | None:
         total = 0
     if not footer and total > len(rows):
         footer = menus.label("more_hint", lang)
-    return menus.options_from([(o["label"], o["description"]) for o in rows], "list",
+    return menus.options_from([(o["label"], o["description"]) for o in rows], _data_kind(spec, len(rows)),
                               button_text=render(text_of(spec.get("button_text"), lang), state),
                               section_title=render(text_of(spec.get("section_title"), lang), state),
                               header=render(text_of(node.get("header"), lang), state), footer=footer)

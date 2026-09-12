@@ -67,6 +67,10 @@ TEMPLATE_SPECS: dict[str, TemplateSpec] = {
         TemplateSpec("voice_off", "Voice note received", "Customer sent a voice message while voice notes are switched off (Settings -> Conversation). Speech-to-text can misread digits, so the bot asks for the number in writing rather than guessing.", _S, menu="buttons"),
         TemplateSpec("verify_failed", "Verification failed", "Number not in the customer Excel, or the PPC customer name does not match byte-for-byte. Sent in all three languages together.", frozenset({"support"}), trilingual=True),
         TemplateSpec("new_customer_pending", "New customer, not set up yet", "A number on Data -> New customers (it signed up through a workflow) writes again before it is in the customer Excel. It has no orders to show yet. {customer_name} is the name they gave.", _S),
+        TemplateSpec("too_many_repeats", "Asked the same thing too often", "The same order has been asked about "
+                     "several times in a row (Settings -> Conversation). The bot says so once and stops, rather than "
+                     "sending the same status again; the next message starts a fresh conversation.",
+                     frozenset({"so_no", "fg_code", "support", "customer_name"})),
         TemplateSpec("service_down", "Service unavailable", "Unexpected error while processing. Sent in all three languages together.", frozenset({"support"}), trilingual=True),
         TemplateSpec("rate_limited", "Too many messages", "Customer exceeded the per-phone rate limit.", frozenset({"support"})),
     ]

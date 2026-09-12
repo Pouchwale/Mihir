@@ -17,10 +17,10 @@ from tests.flow import MEHTA, SHREE, UNKNOWN
 
 H = {"X-Admin-Key": "test-admin"}
 
-ROWS = [{"so_no": "45240", "po_no": "PO-8801", "fg_item_code": "FG-2001", "real_status": "Printing",
-         "customer_name": "Mehta Foods"},
-        {"so_no": "45239", "po_no": "", "fg_item_code": "FG-2002", "real_status": "Dispatched",
-         "customer_name": "Mehta Foods"}]
+ROWS = [{"so_no": "45240", "po_no": "PO-8801", "fg_item_code": "FG-2001", "fg_description": "Spice pouch 200g",
+         "real_status": "Printing", "customer_name": "Mehta Foods"},
+        {"so_no": "45239", "po_no": "", "fg_item_code": "FG-2002", "fg_description": "Spice pouch 500g",
+         "real_status": "Dispatched", "customer_name": "Mehta Foods"}]
 
 
 def doc() -> dict:
@@ -110,14 +110,48 @@ async def test_their_own_record_in_the_customer_list(db):
 
 
 # ---------------- showing the rows, and picking one ----------------
-async def test_the_rows_are_drawn_as_one_legal_whatsapp_list():
+async def test_a_few_rows_are_tap_buttons_and_more_are_a_list():
+    """Buttons need no opening, so two or three orders are buttons - as the order-status bot shows
+    them. Buttons carry no description, which is exactly what a customer should see for an order
+    number: the number, and nothing else."""
     turn = await start()
     assert [m.text for m in turn.messages] == ["You have 2 orders. Which one?"]
     options = turn.messages[0].options
-    assert menus.validate(options) == []
+    assert options.kind == "buttons" and menus.validate(options) == []
     assert [o.title for o in options.items] == ["45240", "45239"]
-    assert [o.description for o in options.items] == ["Printing", "Dispatched"]
-    assert options.button_text == "Choose"
+    assert [o.description for o in options.items] == ["", ""]
+
+    many = [dict(ROWS[0], so_no=str(45230 + i)) for i in range(6)]
+    turn = await start(rows=many)
+    options = turn.messages[0].options
+    assert options.kind == "list" and options.button_text == "Choose"
+    assert menus.validate(options) == [] and options.items[0].description == "Printing"
+
+
+async def test_the_owner_can_insist_on_a_list_or_on_buttons():
+    always = doc()
+    always["nodes"][1]["input"]["show"] = "list"
+    turn = await engine.start(schema.parse(always), data=stub_rows(ROWS))
+    assert turn.messages[0].options.kind == "list"
+    assert [i.message for i in validate_graph(always) if i.level == "fail"] == []
+
+    broken = doc()
+    broken["nodes"][1]["input"]["show"] = "sideways"
+    assert any("buttons, as a list, or automatically" in i.message for i in validate_graph(broken))
+
+
+async def test_a_title_too_long_to_fit_is_cut_once_and_still_matches_when_tapped():
+    """What the customer taps is what we match: both have to be the cut text, or the tap is ignored."""
+    by_description = doc()
+    by_description["nodes"][1]["input"]["title_field"] = "fg_description"
+    rows = [dict(ROWS[0], fg_description="Stand-up pouch 500g matte with zipper and window")]
+    graph = schema.parse(by_description)
+    first = await engine.start(graph, data=stub_rows(rows))
+    shown = first.messages[0].options.items[0].title
+    assert len(shown) <= menus.BUTTON_TEXT_MAX
+    turn = await engine.advance(graph, first.state, shown, data=stub_rows(rows), lookup=fresh)
+    assert turn.stopped == "end"  # the tap was understood, not quietly ignored
+    assert turn.state.vars["order"] == "45240"  # and what is stored is the code from the data, not the label
 
 
 async def test_what_a_data_step_leaves_for_later_steps():

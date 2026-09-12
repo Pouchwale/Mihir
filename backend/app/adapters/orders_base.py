@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 REQUIRED = ("so_no", "customer_name", "real_status")
-OPTIONAL = ("po_no", "fg_item_code", "connection_status")
+OPTIONAL = ("po_no", "fg_item_code", "fg_description", "connection_status")
 FIELDS = REQUIRED + OPTIONAL
 
 
@@ -17,6 +17,7 @@ class OrderRow:
     real_status: str | None
     po_no: str | None = None
     fg_item_code: str | None = None
+    fg_description: str | None = None
     connection_status: str | None = None
 
 
@@ -113,6 +114,7 @@ def map_rows(raw_rows: list[dict], column_map: dict[str, str]) -> MappedResult:
                 real_status=cell_to_str(r.get(resolved["real_status"])),
                 po_no=cell_to_str(r.get(resolved["po_no"])) if "po_no" in resolved else None,
                 fg_item_code=cell_to_str(r.get(resolved["fg_item_code"])) if "fg_item_code" in resolved else None,
+                fg_description=cell_to_str(r.get(resolved["fg_description"])) if "fg_description" in resolved else None,
                 connection_status=cell_to_str(r.get(resolved["connection_status"])) if "connection_status" in resolved else None,
             )
         )

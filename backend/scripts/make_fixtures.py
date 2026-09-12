@@ -31,18 +31,20 @@ CUSTOMERS = [
 ]
 
 # ---- orders: whole table as the external API would return it ----
-ORDER_HEADERS = ["SO No", "PO No", "FG Item Code", "Customer Name", "Connection Status", "Real Status (PPC)"]
+ORDER_HEADERS = ["SO No", "PO No", "FG Item Code", "FG Description", "Customer Name", "Connection Status",
+                 "Real Status (PPC)"]
+# The description is what the item IS, in the customer's words - an item code means nothing to them.
 ORDERS = [
-    ("45231", "PO-7781", "FG-1001", "Shree Packaging Pvt Ltd", "CONN-PLANT-A-OK", "In Production"),
-    ("45232", "PO-7782", "FG-1002", "Shree Packaging Pvt Ltd", "CONN-PLANT-A-OK", "Dispatched"),
-    ("45240", "PO-8801", "FG-2001", "Mehta Foods", "CONN-PLANT-B-OK", "Ready for Dispatch"),
-    ("45240", "PO-8801", "FG-2002", "Mehta Foods", "CONN-PLANT-B-OK", "Printing"),
-    ("45240", "PO-8801", "FG-2003", "Mehta Foods", "CONN-PLANT-B-DELAY", "Awaiting Material"),
-    ("45250", "PO-9901", "FG-3001", "Gujarat Polymers", "CONN-PLANT-A-OK", "Lamination"),
-    ("45250", "PO-9901", "FG-3002", "Gujarat Polymers", "CONN-PLANT-A-OK", "Slitting"),
-    ("45260", "PO-5555", "FG-4001", "Patel Agro Industries ", "CONN-PLANT-C-OK", "Cylinder Making"),   # trailing space -> mismatch
-    ("45270", "PO-6666", "FG-5001", "SUNRISE PHARMA", "CONN-PLANT-C-OK", "Quality Check"),             # case differs -> mismatch
-    ("45280", "PO-7777", "FG-6001", "Royal Textiles", "CONN-PLANT-B-OK", "Delivered"),
+    ("45231", "PO-7781", "FG-1001", "Stand-up pouch 500g, matte, zipper", "Shree Packaging Pvt Ltd", "CONN-PLANT-A-OK", "In Production"),
+    ("45232", "PO-7782", "FG-1002", "Stand-up pouch 1kg, gloss", "Shree Packaging Pvt Ltd", "CONN-PLANT-A-OK", "Dispatched"),
+    ("45240", "PO-8801", "FG-2001", "Spice pouch 200g, matte", "Mehta Foods", "CONN-PLANT-B-OK", "Ready for Dispatch"),
+    ("45240", "PO-8801", "FG-2002", "Spice pouch 500g, gloss", "Mehta Foods", "CONN-PLANT-B-OK", "Printing"),
+    ("45240", "PO-8801", "FG-2003", "Namkeen pouch 1kg, metallised", "Mehta Foods", "CONN-PLANT-B-DELAY", "Awaiting Material"),
+    ("45250", "PO-9901", "FG-3001", "Shrink sleeve, 500ml bottle", "Gujarat Polymers", "CONN-PLANT-A-OK", "Lamination"),
+    ("45250", "PO-9901", "FG-3002", "Shrink sleeve, 1L bottle", "Gujarat Polymers", "CONN-PLANT-A-OK", "Slitting"),
+    ("45260", "PO-5555", "FG-4001", "Fertiliser bag 5kg, BOPP", "Patel Agro Industries ", "CONN-PLANT-C-OK", "Cylinder Making"),   # trailing space -> mismatch
+    ("45270", "PO-6666", "FG-5001", "Tablet strip label, 40x60mm", "SUNRISE PHARMA", "CONN-PLANT-C-OK", "Quality Check"),          # case differs -> mismatch
+    ("45280", "PO-7777", "FG-6001", "Garment label roll, satin", "Royal Textiles", "CONN-PLANT-B-OK", "Delivered"),
 ]
 
 

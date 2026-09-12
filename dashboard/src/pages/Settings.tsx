@@ -98,6 +98,8 @@ function ConversationCard() {
   const [waba, setWaba] = useState("");
   const [testNumbers, setTestNumbers] = useState("");
   const [handoverHours, setHandoverHours] = useState<number>(24);
+  const [repeatLimit, setRepeatLimit] = useState<number>(3);
+  const [repeatAction, setRepeatAction] = useState("end");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -110,6 +112,8 @@ function ConversationCard() {
     setWaba(String(data.fields.wati_waba_id?.value ?? ""));
     setTestNumbers(String(data.fields.workflow_test_numbers?.value ?? ""));
     setHandoverHours(Number(data.fields.agent_handover_hours?.value ?? 24));
+    setRepeatLimit(Number(data.fields.repeat_limit?.value ?? 3));
+    setRepeatAction(String(data.fields.repeat_action?.value ?? "end"));
   }, [data]);
 
   const saved = data ? {
@@ -117,9 +121,12 @@ function ConversationCard() {
     channel: String(data.fields.wati_channel_number?.value ?? ""), waba: String(data.fields.wati_waba_id?.value ?? ""),
     testNumbers: String(data.fields.workflow_test_numbers?.value ?? ""),
     handoverHours: Number(data.fields.agent_handover_hours?.value ?? 24),
+    repeatLimit: Number(data.fields.repeat_limit?.value ?? 3),
+    repeatAction: String(data.fields.repeat_action?.value ?? "end"),
   } : null;
   const dirty = !!saved && (saved.timeout !== timeout || saved.style !== style || saved.channel !== channel || saved.waba !== waba
-    || saved.testNumbers !== testNumbers || saved.handoverHours !== handoverHours);
+    || saved.testNumbers !== testNumbers || saved.handoverHours !== handoverHours
+    || saved.repeatLimit !== repeatLimit || saved.repeatAction !== repeatAction);
 
   const save = async () => {
     setBusy(true); setMsg(null); setErrors({});
@@ -131,6 +138,8 @@ function ConversationCard() {
       if (saved?.waba !== waba) values.wati_waba_id = waba.trim();
       if (saved?.testNumbers !== testNumbers) values.workflow_test_numbers = testNumbers.trim();
       if (saved?.handoverHours !== handoverHours) values.agent_handover_hours = handoverHours;
+      if (saved?.repeatLimit !== repeatLimit) values.repeat_limit = repeatLimit;
+      if (saved?.repeatAction !== repeatAction) values.repeat_action = repeatAction;
       const r = await api.saveConnections(values);
       if (r.ok) { setMsg("Saved. The bot uses this from the next message."); await reload(); }
       else { setErrors(r.errors); setMsg("Please fix the marked field."); }
@@ -185,6 +194,28 @@ function ConversationCard() {
             value={handoverHours} onChange={(e) => setHandoverHours(Number(e.target.value))} />
           {errors.agent_handover_hours && <div className="text-xs text-rose-600 mt-0.5">{errors.agent_handover_hours}</div>}
           <div className="text-xs text-slate-500 mt-0.5">After an Assign step the bot is quiet for that customer. WATI does not tell the bot when an agent solves the chat, so it takes the chat back after this long without a message from the customer. 0 = only when you click Hand back to bot.</div>
+        </label>
+      </div>
+      <div className="grid md:grid-cols-2 gap-4">
+        <label className="block">
+          <div className="font-medium text-slate-700">Stop after the same request this many times</div>
+          <input type="number" min={0} max={20} className={`input w-28 ${errors.repeat_limit ? "border-rose-400" : ""}`}
+            value={repeatLimit} onChange={(e) => setRepeatLimit(Number(e.target.value))} />
+          {errors.repeat_limit && <div className="text-xs text-rose-600 mt-0.5">{errors.repeat_limit}</div>}
+          <div className="text-xs text-slate-500 mt-0.5">
+            A customer asking about the same order over and over gets the same status back, which helps nobody. After
+            this many identical requests in a row the bot says so once and stops. 0 = never stop.
+          </div>
+        </label>
+        <label className="block">
+          <div className="font-medium text-slate-700">When that happens</div>
+          <select className="input w-full" value={repeatAction} onChange={(e) => setRepeatAction(e.target.value)}>
+            <option value="end">End the conversation (their next message starts fresh)</option>
+            <option value="person">Hand the chat to a person (the bot goes quiet)</option>
+          </select>
+          <div className="text-xs text-slate-500 mt-0.5">
+            Handing over shows the chat under <b>Live sessions</b>, where your team can reply from the dashboard.
+          </div>
         </label>
       </div>
       <div className="flex items-center gap-2">

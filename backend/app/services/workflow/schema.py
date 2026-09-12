@@ -72,7 +72,7 @@ FILE_ANSWERS = ("image", "document", "video", "audio")
 DATA_SOURCES = ("orders", "customer")
 DATA_FINDS = ("all", "so", "po", "fg")
 DATA_FIELDS: dict[str, tuple[str, ...]] = {
-    "orders": ("so_no", "po_no", "fg_item_code", "real_status", "customer_name"),
+    "orders": ("so_no", "po_no", "fg_item_code", "fg_description", "real_status", "customer_name"),
     "customer": ("customer_code", "customer_name"),
 }
 # Fields that identify one row. A title taken from anything else can repeat, and two rows a customer
@@ -80,6 +80,8 @@ DATA_FIELDS: dict[str, tuple[str, ...]] = {
 DATA_KEY_FIELDS = ("so_no", "po_no", "fg_item_code", "customer_code")
 DATA_OPS = ("eq", "ne", "contains", "is_set", "is_empty")
 DATA_SORTS = ("newest", "oldest", "as_is")
+# How a data list is drawn: WhatsApp buttons read better for two or three rows, a list beyond that.
+DATA_SHOW = ("auto", "list", "buttons")
 DATA_GROUPS = ("so", "line")
 # What one run may carry. A run is stored as JSON per customer and round-trips through the browser in
 # the test chat, so the rows a step remembers are capped at every edge.
