@@ -165,3 +165,104 @@ class WebhookLog(Base):
     wati_msg_id: Mapped[str | None] = mapped_column(String(100))
     event_type: Mapped[str | None] = mapped_column(String(40))
     body_bytes: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Workflow(Base):
+    """One conversation the owner drew in the visual editor.
+
+    The row is only identity plus which snapshot is live; the graph itself lives in
+    WorkflowVersion, so publishing and rolling back never rewrite or lose a draft."""
+
+    __tablename__ = "workflows"
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(60), unique=True)  # slug, stable across renames
+    title: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # published is not the same as live
+    published_version: Mapped[int | None] = mapped_column(Integer)
+    draft_version: Mapped[int | None] = mapped_column(Integer)
+    priority: Mapped[int] = mapped_column(Integer, default=100)  # lowest first, when triggers compete
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class WorkflowVersion(Base):
+    """An immutable snapshot of a graph. Never updated once published.
+
+    Rollback repoints Workflow.published_version at an older row rather than copying nodes back,
+    so every version the owner ever published stays intact and inspectable."""
+
+    __tablename__ = "workflow_versions"
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    workflow_id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(10), default="draft")  # draft | published | archived
+    graph: Mapped[str] = mapped_column(Text)  # the JSON document the editor produced
+    notes: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime)
+    __table_args__ = (UniqueConstraint("workflow_id", "version", name="uq_wfver_workflow_version"),)
+
+
+class WorkflowRun(Base):
+    """Where one customer is inside a published workflow. One row per phone: a customer is in at most
+    one workflow at a time, and the order-status bot's own `sessions` row is left untouched.
+
+    The run is pinned to the version it started on, so publishing a change mid-conversation never
+    pulls the ground from under a customer halfway through a question. `last_key` remembers the
+    workflow that finished most recently, so a greeting for new numbers fires once per conversation
+    rather than on every message."""
+
+    __tablename__ = "workflow_runs"
+    phone_e164: Mapped[str] = mapped_column(String(15), primary_key=True)
+    workflow_key: Mapped[str] = mapped_column(String(60), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(Text, default="{}")  # engine.RunState as JSON
+    status: Mapped[str] = mapped_column(String(10), default="active", index=True)  # active | waiting | running | done
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)  # when a Wait step is over
+    trigger: Mapped[str | None] = mapped_column(String(80))  # how it started, for the dashboard
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    last_key: Mapped[str | None] = mapped_column(String(60))
+    last_finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class AgentHandover(Base):
+    """A person has the chat, so the bot stays quiet for this customer until it is handed back
+    (services/handover.py says when)."""
+
+    __tablename__ = "agent_handovers"
+    phone_e164: Mapped[str] = mapped_column(String(15), primary_key=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    assignee: Mapped[str | None] = mapped_column(String(255))  # operator email or team names
+    source: Mapped[str | None] = mapped_column(String(120))  # which workflow, or the dashboard
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime)  # the customer's latest message
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime)
+    end_reason: Mapped[str | None] = mapped_column(String(120))
+
+
+class NewCustomer(Base):
+    """A number that signed up through a workflow (the "numbers not in your customer list" trigger).
+
+    Kept apart from `customers` on purpose: that table is replaced by every sync of the customer
+    Excel, and it is what decides who may see orders - nothing a stranger types into a workflow may
+    ever grant that."""
+
+    __tablename__ = "new_customers"
+    phone_e164: Mapped[str] = mapped_column(String(15), primary_key=True)
+    whatsapp_name: Mapped[str | None] = mapped_column(String(255))
+    details: Mapped[str] = mapped_column(Text, default="{}")  # the answers they gave, as JSON
+    workflow_key: Mapped[str | None] = mapped_column(String(60))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class QuestionPreset(Base):
+    """A question the owner saved to reuse: offered under "What are you asking?" in every workflow."""
+
+    __tablename__ = "question_presets"
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(String(40))
+    spec: Mapped[str] = mapped_column(Text)  # the question's settings as JSON (see workflow/presets.py)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

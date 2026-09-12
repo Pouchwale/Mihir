@@ -14,7 +14,7 @@ export default function Messages() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Message log</h1>
+      <h1 className="text-xl font-semibold">Chat log</h1>
       <div className="flex flex-wrap gap-2">
         <input className="input" placeholder="Phone" value={phone} onChange={(e) => { setPhone(e.target.value); setPage(1); }} />
         <input className="input flex-1 min-w-[200px]" placeholder="Search text / transcript" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />

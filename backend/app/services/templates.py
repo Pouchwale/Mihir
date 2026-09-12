@@ -66,6 +66,7 @@ TEMPLATE_SPECS: dict[str, TemplateSpec] = {
         TemplateSpec("bye", "Goodbye", "Customer taps Done or says thanks / bye. The next message starts a new window with the greeting.", _S, menu="buttons"),
         TemplateSpec("voice_off", "Voice note received", "Customer sent a voice message while voice notes are switched off (Settings -> Conversation). Speech-to-text can misread digits, so the bot asks for the number in writing rather than guessing.", _S, menu="buttons"),
         TemplateSpec("verify_failed", "Verification failed", "Number not in the customer Excel, or the PPC customer name does not match byte-for-byte. Sent in all three languages together.", frozenset({"support"}), trilingual=True),
+        TemplateSpec("new_customer_pending", "New customer, not set up yet", "A number on Data -> New customers (it signed up through a workflow) writes again before it is in the customer Excel. It has no orders to show yet. {customer_name} is the name they gave.", _S),
         TemplateSpec("service_down", "Service unavailable", "Unexpected error while processing. Sent in all three languages together.", frozenset({"support"}), trilingual=True),
         TemplateSpec("rate_limited", "Too many messages", "Customer exceeded the per-phone rate limit.", frozenset({"support"})),
     ]
@@ -184,6 +185,7 @@ FLOW_NODES = [
     {"key": "confirm_so", "kind": "bot", "col": 4, "row": 3},
     {"key": "_in_unknown", "kind": "customer", "title": "Unknown number writes", "text": "any message", "col": 0, "row": 2},
     {"key": "verify_failed", "kind": "bot", "col": 1, "row": 2},
+    {"key": "new_customer_pending", "kind": "bot", "col": 1, "row": 3},
 ]
 
 FLOW_EDGES = [
@@ -209,6 +211,7 @@ FLOW_EDGES = [
     {"from": "confirm_so", "to": "result", "label": "taps Yes"},
     {"from": "confirm_so", "to": "ask_so_list", "label": "taps No"},
     {"from": "_in_unknown", "to": "verify_failed", "label": "number not in Excel"},
+    {"from": "_in_unknown", "to": "new_customer_pending", "label": "signed up through a workflow"},
 ]
 
 FLOW_KEYS = {n["key"] for n in FLOW_NODES if n["kind"] == "bot"}

@@ -14,7 +14,8 @@ from .config import get_settings
 from .db import dispose_db, init_db
 from .jobs import customer_sync, order_refresh, queue_worker, scheduler
 from .logging_setup import setup_logging
-from .routers import admin, connections, health, templates as templates_router, webhook
+from .routers import (admin, connections, health, templates as templates_router,
+                      wa_templates, webhook, workflows)
 from .services import preflight, settings_store, templates
 
 log = structlog.get_logger(__name__)
@@ -87,6 +88,8 @@ app.include_router(health.router)
 app.include_router(admin.router)
 app.include_router(templates_router.router)
 app.include_router(connections.router)
+app.include_router(workflows.router)
+app.include_router(wa_templates.router)
 
 
 @app.get("/", include_in_schema=False)

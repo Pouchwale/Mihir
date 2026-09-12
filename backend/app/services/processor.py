@@ -14,11 +14,12 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
-from ..models import MessageLog
-from . import alerts, intent, rate_limit, replies, stt
+from ..models import MessageLog, utcnow
+from . import alerts, handover, intent, rate_limit, replies, stt
 from .menus import Options
 from .state_machine import get_or_create_session, step
 from .wati import wati
+from .workflow import runtime as workflows
 
 log = structlog.get_logger(__name__)
 
@@ -83,6 +84,23 @@ async def _log_out(db: AsyncSession, phone: str, text: str, outcome: str, step_a
     )
 
 
+def _workflow_result(handled, phone: str, text: str | None, transcript: str | None, msg_type: str,
+                     in_row: MessageLog | None, bound) -> ProcessResult:
+    """A message a workflow answered. Its replies are already sent and logged by the runtime."""
+    step_after = workflows.step_label(handled.key)
+    last = handled.messages[-1] if handled.messages else None
+    if in_row:
+        in_row.outcome = handled.code
+        in_row.step_after = step_after
+        if msg_type == "interactive":
+            in_row.msg_type = "interactive"
+            in_row.text = text
+    bound.info("processed_by_workflow", workflow=handled.key, outcome=handled.code, messages=len(handled.messages))
+    return ProcessResult(phone, text, transcript, last.text if last else None, handled.code, step_after,
+                         options=last.options.to_dict() if last and last.options else None,
+                         replies=[m.text for m in handled.messages])
+
+
 async def process_payload(db: AsyncSession, payload: dict, message_log_id: int | None = None) -> ProcessResult:
     settings = get_settings()
     phone, msg_type, text, media = extract_message(payload)
@@ -91,6 +109,15 @@ async def process_payload(db: AsyncSession, payload: dict, message_log_id: int |
     in_row = await db.get(MessageLog, message_log_id) if message_log_id else None
 
     try:
+        # A person has this chat (an Assign step, or "Hand to a person" in the dashboard): the bot says
+        # nothing at all until it is handed back. The message is still in the chat log.
+        with_agent = await handover.active(db, phone) if phone else None
+        if with_agent is not None:
+            with_agent.last_message_at = utcnow()
+            if in_row:
+                in_row.outcome = "with_agent"
+            bound.info("with_agent", assignee=with_agent.assignee)
+            return ProcessResult(phone, text, None, None, "with_agent", None)
         allowed, just_exceeded = await rate_limit.check(db, phone)
         if not allowed:
             bound.warning("rate_limited")
@@ -122,12 +149,20 @@ async def process_payload(db: AsyncSession, payload: dict, message_log_id: int |
         # an unprefixed number means an item, not an order. A tapped option is an exact string the
         # regex already understands, so it never needs the AI call.
         session = await get_or_create_session(db, phone)
+        # Live workflows get the first look (the order is in workflow/runtime.py). With none switched
+        # on this is one cached lookup, and everything below runs exactly as it always has.
+        if not voice_blocked:
+            handled = await workflows.handle(db, session, phone, text, payload)
+            if handled is not None:
+                return _workflow_result(handled, phone, text, transcript, msg_type, in_row, bound)
         parsed = await intent.parse(text or "", allow_ai=(msg_type != "interactive"), step=session.step)
         # one customer message can produce several bot messages (greeting, then the language question)
         outcomes = await step(db, session, parsed, from_audio, voice_blocked=voice_blocked)
 
         sent: list[str] = []
         for outcome in outcomes:
+            if outcome.code == "menu":  # live workflows can add their own row to the main menu
+                outcome.options = await workflows.main_menu(outcome.options, outcome.language, phone, db)
             reply = replies.build(outcome.template, outcome.ctx, outcome.language)
             await wati.send_options(phone, reply, outcome.options)
             await _log_out(db, phone, reply, outcome.code, session.step, outcome.options)

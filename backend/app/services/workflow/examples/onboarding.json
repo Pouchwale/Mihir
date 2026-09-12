@@ -1,0 +1,161 @@
+{
+  "schema": 1,
+  "start": "n_lang",
+  "settings": {},
+  "nodes": [
+    {
+      "id": "n_lang",
+      "type": "question",
+      "title": "Language",
+      "x": 40,
+      "y": 40,
+      "text": {
+        "en": "Welcome to Gujarat Printpack! Please choose your language.",
+        "hi": "गुजरात प्रिंटपैक में स्वागत है। भाषा चुनें।",
+        "gu": "ગુજરાત પ્રિન્ટપેકમાં સ્વાગત છે। ભાષા પસંદ કરો."
+      },
+      "input": {
+        "kind": "language"
+      }
+    },
+    {
+      "id": "n_hello",
+      "type": "message",
+      "title": "Not on our list",
+      "x": 360,
+      "y": 40,
+      "text": {
+        "en": "We do not have your number on our customer list yet. Two quick questions and our team will get in touch.",
+        "hi": "आपका नंबर हमारी सूची में नहीं है। दो सवाल।",
+        "gu": "તમારો નંબર અમારી યાદીમાં નથી. બે પ્રશ્ન."
+      }
+    },
+    {
+      "id": "n_company",
+      "type": "question",
+      "title": "Company name",
+      "x": 680,
+      "y": 40,
+      "text": {
+        "en": "What is your company name?",
+        "hi": "आपकी कंपनी का नाम?",
+        "gu": "તમારી કંપનીનું નામ?"
+      },
+      "input": {
+        "kind": "text"
+      },
+      "store": "company"
+    },
+    {
+      "id": "n_person",
+      "type": "question",
+      "title": "Contact person",
+      "x": 1000,
+      "y": 40,
+      "text": {
+        "en": "And who should we ask for?",
+        "hi": "किससे बात करें?",
+        "gu": "કોને પૂછીએ?"
+      },
+      "input": {
+        "kind": "text"
+      },
+      "store": "person"
+    },
+    {
+      "id": "n_confirm",
+      "type": "question",
+      "title": "Confirm",
+      "x": 1320,
+      "y": 40,
+      "text": {
+        "en": "So that is {person} at {company}. Have I got that right?",
+        "hi": "{company} - {person}. सही है?",
+        "gu": "{company} - {person}. સાચું?"
+      },
+      "input": {
+        "kind": "buttons",
+        "options": [
+          {
+            "value": "yes",
+            "label": {
+              "en": "That's right",
+              "hi": "सही है",
+              "gu": "સાચું છે"
+            }
+          },
+          {
+            "value": "no",
+            "label": {
+              "en": "Let me redo it",
+              "hi": "फिर से",
+              "gu": "ફરીથી"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "n_done",
+      "type": "end",
+      "title": "Thank you",
+      "x": 1640,
+      "y": 40,
+      "text": {
+        "en": "Thank you {person} - our team will contact you shortly.",
+        "hi": "धन्यवाद {person}।",
+        "gu": "આભાર {person}."
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "n_lang",
+      "port": "opt:en",
+      "to": "n_hello"
+    },
+    {
+      "id": "e2",
+      "from": "n_lang",
+      "port": "opt:hi",
+      "to": "n_hello"
+    },
+    {
+      "id": "e3",
+      "from": "n_lang",
+      "port": "opt:gu",
+      "to": "n_hello"
+    },
+    {
+      "id": "e4",
+      "from": "n_hello",
+      "port": "next",
+      "to": "n_company"
+    },
+    {
+      "id": "e5",
+      "from": "n_company",
+      "port": "next",
+      "to": "n_person"
+    },
+    {
+      "id": "e6",
+      "from": "n_person",
+      "port": "next",
+      "to": "n_confirm"
+    },
+    {
+      "id": "e7",
+      "from": "n_confirm",
+      "port": "opt:yes",
+      "to": "n_done"
+    },
+    {
+      "id": "e8",
+      "from": "n_confirm",
+      "port": "opt:no",
+      "to": "n_company"
+    }
+  ]
+}

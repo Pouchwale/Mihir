@@ -69,8 +69,17 @@ _F = [
     Field("customers_col_contact", "customers", "str"),
     Field("customer_sync_cron", "customers", "str"),
     # ---- conversation ----
+    Field("wati_waba_id", "conversation", "str"),
+    Field("wati_channel_number", "conversation", "str"),
+    Field("workflow_test_numbers", "conversation", "str"),
+    Field("agent_handover_hours", "conversation", "int", min=0, max=720),
     Field("session_timeout_min", "conversation", "int", min=1, max=1440),
     Field("so_menu_style", "conversation", "choice", choices=("auto", "list")),
+    # ---- AI (Groq) ----
+    Field("groq_api_key", "ai", "str", secret=True),
+    Field("ai_builder_model", "ai", "str"),
+    Field("ai_live_model", "ai", "str"),
+    Field("translate_provider", "ai", "choice", choices=("auto", "ai", "free")),
 ]
 FIELDS: dict[str, Field] = {f.key: f for f in _F}
 SECRET_KEYS = {f.key for f in _F if f.secret}

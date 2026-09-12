@@ -15,11 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import get_settings
 from ..db import day_of, get_db
 from ..jobs import customer_sync, order_refresh, queue_worker, scheduler, session_cleanup
-from ..models import Customer, InboundQueue, MessageLog, NameMismatchLog, OrderCache, Session, SyncRun, WebhookLog, utcnow
+from ..models import Customer, InboundQueue, MessageLog, NameMismatchLog, NewCustomer, OrderCache, Session, SyncRun, WebhookLog, utcnow, WorkflowRun
 import structlog
 
-from ..services import alerts, intent, preflight, settings_store
+from ..services import alerts, handover, intent, menus, preflight, settings_store
 from ..services.state_machine import reset
+from ..services.verify import new_customer_name
 from ..services.wati import wati
 from ..utils.phone import normalize_phone
 from .health import status_payload
@@ -293,6 +294,95 @@ async def reset_session(phone: str, db: AsyncSession = Depends(get_db)):
     s = await db.get(Session, phone)
     if s:
         reset(s)
+    run = await db.get(WorkflowRun, phone)
+    if run is not None:  # a reset means a clean start everywhere, workflows included
+        await db.delete(run)
+    await handover.end(db, phone, "session reset")
+    return {"ok": True}
+
+
+class ReplyIn(BaseModel):
+    text: str
+
+
+@api.post("/sessions/{phone}/reply")
+async def reply_as_person(phone: str, body: ReplyIn, db: AsyncSession = Depends(get_db)):
+    """Send a WhatsApp message to this customer as your team, from Live sessions.
+
+    Only while a person has the chat. While the bot is answering, two replies to one message is
+    worse than none - and the bot cannot know what your agent just promised. WhatsApp itself only
+    allows a plain reply within 24 hours of the customer's last message; outside that WATI refuses,
+    and its reason is passed on as it is."""
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(400, "Write something to send.")
+    if len(text) > menus.BODY_MAX:
+        raise HTTPException(400, f"WhatsApp allows {menus.BODY_MAX} characters in one message; that one is {len(text)}.")
+    if await handover.active(db, phone) is None:
+        raise HTTPException(409, "The bot is still answering this chat. Click “Hand to a person” first, so it stays "
+                                 "quiet while you reply.")
+    try:
+        await wati.send_text(phone, text)
+    except Exception as e:  # noqa: BLE001 - whatever WATI said, the agent gets a sentence they can act on
+        raise HTTPException(502, str(e).split(" -- ")[-1]) from None
+    db.add(MessageLog(phone_e164=phone, direction="out", msg_type="text", text=text, outcome="agent",
+                      step_after="agent"))
+    log.info("agent_replied", phone=phone, chars=len(text))
+    return {"ok": True}
+
+
+# ---------------- a person has the chat ----------------
+class HandoverIn(BaseModel):
+    assignee: str = ""
+
+
+@api.get("/handovers")
+async def list_handovers(db: AsyncSession = Depends(get_db)):
+    """Chats a person has: the bot is quiet for these numbers until they are handed back."""
+    return await handover.list_active(db)
+
+
+@api.post("/handovers/{phone}")
+async def hand_to_person(phone: str, body: HandoverIn, db: AsyncSession = Depends(get_db)):
+    """Quieten the bot for a chat an agent picked up directly in WATI."""
+    phone = phone.strip()
+    if not phone.isdigit():
+        raise HTTPException(400, "Give the phone number as digits, with the country code.")
+    await handover.start(db, phone, body.assignee.strip(), "the dashboard")
+    return {"ok": True}
+
+
+@api.delete("/handovers/{phone}")
+async def hand_back(phone: str, db: AsyncSession = Depends(get_db)):
+    return {"ok": await handover.end(db, phone.strip(), "handed back from the dashboard")}
+
+
+# ---------------- new customers: signed up through a workflow ----------------
+@api.get("/new-customers")
+async def list_new_customers(db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(select(NewCustomer).order_by(desc(NewCustomer.created_at)))).scalars().all()
+    phones = [r.phone_e164 for r in rows]
+    known = set((await db.execute(select(Customer.phone_e164).where(Customer.phone_e164.in_(phones)))).scalars()) if phones else set()
+    out = []
+    for r in rows:
+        try:
+            details = json.loads(r.details or "{}")
+        except ValueError:
+            details = {}
+        out.append({"phone": r.phone_e164, "name": new_customer_name(r), "whatsapp_name": r.whatsapp_name or "",
+                    "details": details if isinstance(details, dict) else {}, "workflow": r.workflow_key or "",
+                    "created_at": _dt(r.created_at), "updated_at": _dt(r.updated_at),
+                    # once the number is in the customer Excel it is a customer like any other
+                    "in_customer_list": r.phone_e164 in known})
+    return out
+
+
+@api.delete("/new-customers/{phone}")
+async def delete_new_customer(phone: str, db: AsyncSession = Depends(get_db)):
+    row = await db.get(NewCustomer, phone.strip())
+    if row is None:
+        raise HTTPException(404, "That number is not on the New customers list.")
+    await db.delete(row)
     return {"ok": True}
 
 

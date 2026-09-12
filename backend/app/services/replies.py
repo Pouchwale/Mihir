@@ -106,6 +106,11 @@ _T: dict[str, dict[str, str]] = {
         "hi": "क्षमा करें, इस नंबर से आपकी जानकारी सत्यापित नहीं हो सकी। कृपया हमारी टीम से {support} पर संपर्क करें, हम आपकी सहायता करेंगे।",
         "gu": "માફ કરશો, આ નંબર પરથી તમારી વિગતો ચકાસી શકાઈ નથી. કૃપા કરીને અમારી ટીમનો {support} પર સંપર્ક કરો, અમે તમારી મદદ કરીશું.",
     },
+    "new_customer_pending": {
+        "en": "Welcome back! We have your details and our team will be in touch soon. Once your account is set up you can check your order status here. For anything urgent, contact {support}.",
+        "hi": "फिर से स्वागत है! हमारे पास आपकी जानकारी है और हमारी टीम जल्द ही आपसे संपर्क करेगी। आपका खाता बनने के बाद आप यहीं अपने ऑर्डर का स्टेटस देख सकेंगे। किसी भी ज़रूरी काम के लिए {support} पर संपर्क करें।",
+        "gu": "ફરી સ્વાગત છે! અમારી પાસે તમારી વિગતો છે અને અમારી ટીમ ટૂંક સમયમાં તમારો સંપર્ક કરશે. તમારું ખાતું બન્યા પછી તમે અહીં જ તમારા ઓર્ડરનું સ્ટેટસ જોઈ શકશો. કોઈ પણ તાત્કાલિક કામ માટે {support} પર સંપર્ક કરો.",
+    },
     "service_down": {
         "en": "Sorry, our system is temporarily unavailable. Please try again in a few minutes.",
         "hi": "क्षमा करें, हमारा सिस्टम अस्थायी रूप से उपलब्ध नहीं है। कृपया कुछ मिनट बाद पुनः प्रयास करें।",

@@ -65,7 +65,7 @@ Continue?`)) return;
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">Conversation simulator</h1>
+        <h1 className="text-xl font-semibold">Test chat</h1>
         <p className="text-sm text-slate-500">
           Sends a WATI-shaped webhook through the real pipeline (token → dedup → queue → processor). Tap the blue
           options exactly like a customer would on WhatsApp, or type.

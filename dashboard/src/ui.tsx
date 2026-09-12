@@ -63,6 +63,7 @@ export const STEP_TONE: Record<string, string> = { START: "slate", LANG: "slate"
 export const OUTCOME_TONE: Record<string, string> = {
   status_delivered: "green", welcome: "slate", ask_language: "slate", menu: "blue", contact: "blue", ask_so: "blue", ask_fg: "violet", confirm: "amber", not_found: "amber",
   verify_failed: "red", mismatch: "red", service_down: "red", rate_limited: "red", bye: "slate", custom: "blue",
+  agent: "violet", with_agent: "violet", workflow: "blue", workflow_ai: "violet",
 };
 
 export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: string }) {

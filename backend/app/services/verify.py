@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Literal
@@ -15,7 +16,7 @@ from typing import Literal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Customer, NameMismatchLog, OrderCache
+from ..models import Customer, NameMismatchLog, NewCustomer, OrderCache
 
 LookupKind = Literal["ok", "not_found", "mismatch"]
 
@@ -108,3 +109,26 @@ def filter_fg(rows: list[OrderCache], fg_code: str) -> list[OrderCache]:
         return exact
     variants = set(key_variants(fg_code, "FG"))
     return [r for r in rows if _norm_key(r.fg_item_code) in variants]
+
+
+async def find_new_customer(db: AsyncSession, phone_e164: str) -> NewCustomer | None:
+    """A number that signed up through a workflow (Data -> New customers). It never grants access to
+    orders: those are matched only against the customer Excel."""
+    return await db.get(NewCustomer, phone_e164)
+
+
+_NAME_KEYS = ("company", "company_name", "business", "business_name", "firm", "name", "full_name")
+
+
+def new_customer_name(row: NewCustomer) -> str:
+    """The name to greet a new customer by: what they told the workflow, else their WhatsApp name."""
+    try:
+        details = json.loads(row.details or "{}")
+    except ValueError:
+        details = {}
+    if isinstance(details, dict):
+        for key in _NAME_KEYS:
+            got = str(details.get(key) or "").strip()
+            if got:
+                return got[:120]
+    return (row.whatsapp_name or "").strip()

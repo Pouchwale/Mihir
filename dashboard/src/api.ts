@@ -45,6 +45,9 @@ export const api = {
   sessions: () => req<SessionRow[]>("/sessions"),
   session: (phone: string) => req<SessionDetail>(`/sessions/${phone}`),
   resetSession: (phone: string) => req<{ ok: boolean }>(`/sessions/${phone}/reset`, { method: "POST" }),
+  // your team's own reply, sent to the customer on WhatsApp - only while a person has the chat
+  sessionReply: (phone: string, text: string) =>
+    req<{ ok: boolean }>(`/sessions/${phone}/reply`, { method: "POST", body: JSON.stringify({ text }) }),
   messages: (p: Record<string, string | number>) => req<Paged<Msg>>(`/messages?${qs(p)}`),
   mismatches: () => req<Mismatch[]>("/mismatches"),
   imports: (kind?: string) => req<SyncRun[]>(`/imports${kind ? `?kind=${kind}` : ""}`),
@@ -64,6 +67,90 @@ export const api = {
     req<SimResult>("/simulate", { method: "POST", body: JSON.stringify({ phone, text, type, selection }) }),
   // go-live readiness
   readiness: (deep = true) => req<Readiness>(`/readiness?deep=${deep}`),
+  // --- Meta-approved WhatsApp templates ---
+  waTemplates: () => req<{ ok: boolean; detail?: string; templates: WaTemplate[]; waba_id_set?: boolean }>("/wa-templates"),
+  waTemplateCreate: (t: WaTemplateIn) =>
+    req<{ ok: boolean; detail: string }>("/wa-templates", { method: "POST", body: JSON.stringify(t) }),
+  waTemplatePreview: (t: WaTemplateIn) =>
+    req<{ variables: string[]; problems: string[]; preview: string }>(
+      "/wa-templates/preview", { method: "POST", body: JSON.stringify(t) }),
+  waTemplateLanguages: () => req<{ languages: string[]; categories: string[] }>("/wa-templates/languages"),
+  waTemplateDelete: (name: string, language = "") =>
+    req<{ ok: boolean }>(`/wa-templates/${name}${language ? `?language=${language}` : ""}`, { method: "DELETE" }),
+
+  // --- visual workflow builder ---
+  workflows: () => req<WorkflowSummary[]>("/workflows"),
+  workflowExamples: () => req<{ key: string; title: string; description: string }[]>("/workflows/examples"),
+  workflow: (key: string) => req<WorkflowDetail>(`/workflows/${key}`),
+  workflowCreate: (title: string, from_example = "") =>
+    req<WorkflowDetail>("/workflows", { method: "POST", body: JSON.stringify({ title, from_example }) }),
+  workflowRename: (key: string, title: string) =>
+    req<{ ok: boolean }>(`/workflows/${key}`, { method: "PATCH", body: JSON.stringify({ title }) }),
+  workflowDelete: (key: string) => req<{ ok: boolean }>(`/workflows/${key}`, { method: "DELETE" }),
+  workflowSaveDraft: (key: string, doc: WorkflowDoc, base_version?: number) =>
+    req<{ ok: boolean; version: number; saved_at: string; issues: WfIssue[] }>(
+      `/workflows/${key}/draft`, { method: "PUT", body: JSON.stringify({ doc, base_version }) }),
+  workflowValidate: (doc: WorkflowDoc, key = "") =>
+    req<{ ok: boolean; issues: WfIssue[] }>("/workflows/validate", { method: "POST", body: JSON.stringify({ doc, key }) }),
+  workflowPublish: (key: string, version?: number, notes = "") =>
+    req<{ ok: boolean; published_version: number; issues: WfIssue[] }>(
+      `/workflows/${key}/publish`, { method: "POST", body: JSON.stringify({ version, notes }) }),
+  workflowUnpublish: (key: string) => req<{ ok: boolean }>(`/workflows/${key}/unpublish`, { method: "POST" }),
+  workflowVersions: (key: string) => req<WfVersion[]>(`/workflows/${key}/versions`),
+  workflowVersion: (key: string, version: number) =>
+    req<{ version: number; doc: WorkflowDoc }>(`/workflows/${key}/versions/${version}`),
+  workflowSimulate: (key: string, body: {
+    text?: string; state?: Record<string, unknown>; language?: string; use?: string; contact_name?: string;
+    /** test as this customer, so data checks use their real orders */
+    phone?: string;
+    /** a picture, document or location sent instead of text */
+    media?: { type: string; url: string; address?: string };
+  }) =>
+    req<SimTurn>(`/workflows/${key}/simulate`, { method: "POST", body: JSON.stringify(body) }),
+  // a WATI chatbot export, or a file exported from here; always lands as a new draft
+  workflowImport: (data: unknown, title = "") =>
+    req<WorkflowDetail & { report: import("./workflow/types").ImportReport }>(
+      "/workflows/import", { method: "POST", body: JSON.stringify({ data, title }) }),
+  workflowExport: (key: string, use: "draft" | "published" = "draft") =>
+    req<Record<string, unknown>>(`/workflows/${key}/export?use=${use}`),
+  workflowDuplicate: (key: string) => req<WorkflowDetail>(`/workflows/${key}/duplicate`, { method: "POST" }),
+  // what a Find-in-your-data step can look at, under the owner's own column names
+  dataFields: () => req<DataFieldsInfo>("/workflows/data-fields"),
+  // the owner's own saved questions
+  questionPresets: () => req<import("./workflow/types").SavedQuestion[]>("/workflows/question-presets"),
+  saveQuestionPreset: (label: string, spec: Record<string, unknown>) =>
+    req<import("./workflow/types").SavedQuestion>("/workflows/question-presets", { method: "POST", body: JSON.stringify({ label, spec }) }),
+  deleteQuestionPreset: (id: number) => req<{ ok: boolean }>(`/workflows/question-presets/${id}`, { method: "DELETE" }),
+  // English into Hindi and Gujarati: the AI when a Groq key is set (Settings), else the free translators
+  workflowTranslate: (texts: string[], targets: ("hi" | "gu")[] = ["hi", "gu"]) =>
+    req<{ translations: Partial<Record<"hi" | "gu", string[]>> }>(
+      "/workflows/translate", { method: "POST", body: JSON.stringify({ texts, targets }) }),
+  // --- workflows answering customers ---
+  workflowSetLive: (key: string, live: boolean) =>
+    req<{ ok: boolean; live: boolean }>(`/workflows/${key}/live`, { method: "POST", body: JSON.stringify({ live }) }),
+  workflowReorder: (keys: string[]) =>
+    req<{ ok: boolean }>("/workflows/reorder", { method: "POST", body: JSON.stringify({ keys }) }),
+  workflowRouting: () => req<RoutingOverview>("/workflows/routing"),
+  workflowRuns: () => req<WorkflowRunInfo[]>("/workflows/runs"),
+  workflowEndRun: (phone: string) => req<{ ok: boolean }>(`/workflows/runs/${phone}`, { method: "DELETE" }),
+  // --- a person has the chat: the bot is quiet ---
+  handovers: () => req<HandoverInfo[]>("/handovers"),
+  handToPerson: (phone: string, assignee = "") =>
+    req<{ ok: boolean }>(`/handovers/${phone}`, { method: "POST", body: JSON.stringify({ assignee }) }),
+  handBack: (phone: string) => req<{ ok: boolean }>(`/handovers/${phone}`, { method: "DELETE" }),
+  // --- numbers that signed up through a workflow ---
+  newCustomers: () => req<NewCustomerRow[]>("/new-customers"),
+  deleteNewCustomer: (phone: string) => req<{ ok: boolean }>(`/new-customers/${phone}`, { method: "DELETE" }),
+  // --- the AI assistant (Groq): builds run as jobs the editor polls ---
+  aiStatus: () => req<AiStatus>("/workflows/ai/status"),
+  aiBuild: (key: string, instruction: string, doc: WorkflowDoc | null, history: string[] = []) =>
+    req<AiJob>(`/workflows/${key}/ai/build`, { method: "POST", body: JSON.stringify({ instruction, doc, history }) }),
+  aiCreate: (instruction: string) =>
+    req<AiJob>("/workflows/ai/create", { method: "POST", body: JSON.stringify({ instruction }) }),
+  aiJob: (id: string) => req<AiJob>(`/workflows/ai/jobs/${id}`),
+  aiReview: (key: string, doc: WorkflowDoc) =>
+    req<AiReview>(`/workflows/${key}/ai/review`, { method: "POST", body: JSON.stringify({ doc }) }),
+
   diagnostics: () => req<Diagnostics>("/diagnostics"),
   webhookSelfTest: () => req<{ ok: boolean; url: string; status?: number; detail: string }>("/wati/self-test", { method: "POST" }),
   watiWebhooks: () => req<{ ok: boolean; detail?: string; webhooks: Record<string, unknown>[] }>("/wati/webhooks"),
@@ -111,7 +198,39 @@ export interface CustomerTest {
   sample: { phone: string; code: string | null; name: string; raw_contact: string | null }[];
 }
 
+export interface WaTemplate {
+  id: string; name: string; status: string; quality: string; category: string;
+  language: string; body: string; footer: string; last_modified: string; feedback: string;
+}
+export interface WaTemplateButton {
+  type: "quick_reply" | "url" | "call";
+  text: string;
+  url?: string;
+  phone?: string;
+}
+export interface WaTemplateHeader {
+  type: "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
+  text?: string;
+  link?: string;
+}
+export interface WaTemplateIn {
+  name: string; body: string; category: string; language?: string;
+  header?: WaTemplateHeader | null; footer?: string; buttons?: WaTemplateButton[];
+  /** Meta reviews the template with these filled in; an empty one is read as literal "{{name}}". */
+  samples?: Record<string, string>;
+}
+
 export type Lang = "en" | "hi" | "gu";
+
+// The workflow document model lives with the editor that owns it; api.ts only carries it.
+import type {
+  AiJob, AiReview, AiStatus, DataFieldsInfo, HandoverInfo, NewCustomerRow, RoutingOverview, SimTurn, WfIssue,
+  WfVersion, WorkflowDetail, WorkflowDoc, WorkflowRunInfo, WorkflowSummary,
+} from "./workflow/types";
+export type {
+  HandoverInfo, NewCustomerRow, RoutingOverview, SimTurn, WfIssue, WfVersion, WorkflowDetail, WorkflowDoc,
+  WorkflowRunInfo, WorkflowSummary,
+};
 export interface LangText { default: string; text: string; overridden: boolean }
 export interface CatalogTemplate {
   key: string; title: string; when: string; allowed: string[]; required: string[]; max_len: number; trilingual: boolean; neutral: boolean; menu: string;

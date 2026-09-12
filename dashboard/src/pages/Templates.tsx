@@ -43,7 +43,7 @@ export default function Templates() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Messages</h1>
+          <h1 className="text-xl font-semibold">Bot messages</h1>
           <p className="text-sm text-slate-500">Everything the customer reads on WhatsApp. Click a message, change the words, press Save — the very next customer sees it. No restart, no developer.</p>
         </div>
         <div className="ml-auto"><WatiBadge status={wati.data} error={wati.error} onRecheck={wati.reload} /></div>

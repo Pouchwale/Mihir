@@ -7,7 +7,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from ..config import get_settings
 from ..services import templates
-from . import customer_sync, order_refresh, session_cleanup
+from . import customer_sync, order_refresh, session_cleanup, workflow_timer
 
 log = structlog.get_logger(__name__)
 scheduler = AsyncIOScheduler()
@@ -20,6 +20,9 @@ def start() -> None:
     scheduler.add_job(session_cleanup.run, IntervalTrigger(minutes=5), id="session_cleanup", replace_existing=True)
     scheduler.add_job(order_refresh.check_stale, IntervalTrigger(minutes=5), id="stale_check", replace_existing=True)
     scheduler.add_job(templates.load_from_db, IntervalTrigger(seconds=60), id="templates_reload", replace_existing=True)
+    # Wait steps in live workflows: WATI caps a pause at 10 minutes, so a few seconds late is fine.
+    scheduler.add_job(workflow_timer.run, IntervalTrigger(seconds=5), id="workflow_timer", replace_existing=True,
+                      max_instances=1, coalesce=True)
     scheduler.start()
     log.info("scheduler_started", customer_sync_cron=s.customer_sync_cron, order_refresh_minutes=s.order_refresh_minutes)
 

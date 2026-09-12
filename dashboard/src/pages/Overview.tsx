@@ -74,7 +74,7 @@ export default function Overview() {
           <div className="font-medium mb-2">Reply outcomes (14 days)</div>
           <div className="h-64">
             {data.outcomes.length === 0 ? (
-              <div className="text-sm text-slate-500 pt-20 text-center">No replies yet — try the Simulator.</div>
+              <div className="text-sm text-slate-500 pt-20 text-center">No replies yet — try Test chat.</div>
             ) : (
               <ResponsiveContainer>
                 <PieChart>

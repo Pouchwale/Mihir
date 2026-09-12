@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     wati_token: str = ""
     wati_webhook_token: str = "change-me-webhook-token"
     wati_dry_run: bool | None = None  # None = auto (true when token empty)
+    # Your WhatsApp Business Account id. Needed ONLY to delete a Meta-approved template; sending
+    # and creating work without it. WATI shows it under your channel.
+    wati_waba_id: str = ""
+    # The WhatsApp business number customers message. WATI requires it to send a Meta-approved template.
+    wati_channel_number: str = ""
+    # The owner's own phones: a published workflow answers only these until it is switched on for everyone.
+    workflow_test_numbers: str = ""
+    # After an Assign step the bot is quiet for that customer. WATI does not say when an agent solves a
+    # chat, so it takes the chat back after this many hours without a customer message. 0 = only by hand.
+    agent_handover_hours: int = 24
     wati_api_version: Literal["v1", "v3"] = "v1"  # interactive (list/buttons) endpoints: v1 = documented default, v3 = /api/ext/v3
 
     # AI
@@ -62,6 +72,15 @@ class Settings(BaseSettings):
     voice_notes: bool = False
     groq_api_key: str = ""
     groq_stt_model: str = "whisper-large-v3-turbo"
+    # The workflow AI assistant, review, translation and the two live features, all through Groq with
+    # the same key. The address is here only so tests can point it at a stand-in server.
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    ai_builder_model: str = "openai/gpt-oss-120b"
+    ai_live_model: str = "openai/gpt-oss-20b"
+    # steps written per call when the assistant builds a big workflow (Groq's free plan: 8,000 tokens a minute)
+    ai_batch_steps: int = 8
+    # translate buttons in the editor: auto = AI when a Groq key is set, else the free translators
+    translate_provider: Literal["auto", "ai", "free"] = "auto"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
 

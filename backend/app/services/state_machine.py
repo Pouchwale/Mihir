@@ -28,7 +28,7 @@ from . import menus, templates
 from .intent import Parsed
 from .menus import Options
 from .replies import ReplyContext
-from .verify import customer_orders, filter_fg, find_customer, lookup_orders
+from .verify import customer_orders, filter_fg, find_customer, find_new_customer, lookup_orders, new_customer_name
 
 LANGS = ("en", "hi", "gu")
 LANG_INTENTS = {"lang_en": "en", "lang_hi": "hi", "lang_gu": "gu"}
@@ -89,6 +89,12 @@ async def step(db: AsyncSession, session: Session, parsed: Parsed, from_audio: b
     customer = await find_customer(db, session.phone_e164)
     if customer is None:
         reset(session)
+        pending = await find_new_customer(db, session.phone_e164)
+        if pending is not None:
+            # Signed up through a workflow but not in the customer Excel yet: no orders to show - and
+            # never another company's, whatever name they typed - but not a stranger either.
+            ctx_new = ReplyContext(support=support, customer_name=new_customer_name(pending))
+            return [Outcome("new_customer_pending", ctx_new, "new_customer", lang)]
         return [Outcome("verify_failed", ReplyContext(support=support), "verify_failed", lang)]
 
     def ctx(**kw) -> ReplyContext:

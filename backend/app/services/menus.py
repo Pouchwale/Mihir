@@ -119,8 +119,37 @@ def custom_buttons(keys: list[str], lang: str) -> Options | None:
 
 
 # ---------------- builders ----------------
-def _so_sort_key(so: str):
+def so_sort_key(so: str):
+    """Newest first: SO numbers count down, anything else sorts by name after them."""
     return (0, -int(so)) if so.isdigit() else (1, so)
+
+
+_so_sort_key = so_sort_key  # the name the built-in bot's builders below already use
+
+
+def options_from(rows: list[tuple[str, str]], kind: str = "list", *, button_text: str = "",
+                 section_title: str = "", header: str = "", footer: str = "") -> Options | None:
+    """A menu from plain (title, description) rows - what a workflow's data step found.
+
+    Titles are cut to WhatsApp's limit and repeats dropped: two rows that read the same are
+    impossible to tell apart once the customer taps one, and the first would always win."""
+    buttons = kind == "buttons"
+    items: list[Option] = []
+    seen: set[str] = set()
+    for title, description in rows:
+        t = _cut(title, BUTTON_TEXT_MAX if buttons else ROW_TITLE_MAX)
+        if not t or t.casefold() in seen:
+            continue
+        seen.add(t.casefold())
+        items.append(Option(t, "" if buttons else _cut(description, ROW_DESC_MAX)))
+        if len(items) >= (BUTTONS_MAX if buttons else LIST_ROWS_MAX):
+            break
+    if not items:
+        return None
+    return Options(kind="buttons" if buttons else "list", items=items,
+                   button_text=_cut(button_text, LIST_BUTTON_MAX) or "Select",
+                   section_title=_cut(section_title, SECTION_TITLE_MAX),
+                   header=_cut(header, HEADER_MAX), footer=_cut(footer, FOOTER_MAX))
 
 
 def so_list(rows, lang: str) -> Options | None:
