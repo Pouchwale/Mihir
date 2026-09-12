@@ -86,9 +86,15 @@ async def test_validation(clean_settings):
     assert "dropbox_app_key" in await store.save({"customers_source": "dropbox"})
     bad_map = await store.save({"orders_column_map": {"so_no": "SO", "customer_name": ""}})
     assert "orders_column_map" in bad_map
-    # a good column map is kept, unknown fields inside it dropped
+    # a good column map is kept, unknown fields inside it dropped, and columns it does not mention
+    # keep the default header rather than going unread
+    from app.config import DEFAULT_COLUMN_MAP
+
     assert await store.save({"orders_column_map": {"so_no": "A", "customer_name": "B", "real_status": "C", "junk": "D"}}) == {}
-    assert get_settings().orders_column_map == {"so_no": "A", "customer_name": "B", "real_status": "C"}
+    live = get_settings().orders_column_map
+    assert (live["so_no"], live["customer_name"], live["real_status"]) == ("A", "B", "C")
+    assert "junk" not in live
+    assert live["po_no"] == DEFAULT_COLUMN_MAP["po_no"]
     # nothing was written for the rejected saves
     assert get_settings().order_refresh_minutes == 5
 
@@ -224,6 +230,20 @@ def test_a_column_map_written_before_a_column_existed_still_reads_it():
 
     off = Settings(orders_column_map=json.dumps({**older, "fg_description": ""}))
     assert off.orders_column_map["fg_description"] == ""
+
+
+async def test_a_column_map_saved_in_the_dashboard_is_filled_in_too(clean_settings):
+    """Saved settings are applied to the live Settings object, and used to skip its validators - so a
+    map saved before a column existed left that column unread, and nothing said why."""
+    from app.config import DEFAULT_COLUMN_MAP
+
+    older = {k: v for k, v in DEFAULT_COLUMN_MAP.items() if k != "fg_description"}
+    assert await store.save({"orders_column_map": older}) == {}
+    live = get_settings().orders_column_map
+    assert live["fg_description"] == DEFAULT_COLUMN_MAP["fg_description"]
+
+    assert await store.save({"orders_column_map": {**older, "fg_description": ""}}) == {}
+    assert get_settings().orders_column_map["fg_description"] == ""  # switched off stays off
 
 
 def test_a_broken_column_map_in_the_environment_is_a_message_not_a_dead_service(monkeypatch):

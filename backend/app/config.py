@@ -31,7 +31,12 @@ DEFAULT_COLUMN_MAP = {
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=BACKEND_DIR / ".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=BACKEND_DIR / ".env", env_file_encoding="utf-8", extra="ignore",
+        # Settings saved in the dashboard are applied with setattr (see get_settings below). Without
+        # this they would skip every validator, so a value from the database behaved differently from
+        # the same value in .env - a column map saved before a column existed stayed short, and the
+        # column was never read.
+        validate_assignment=True,
     )
 
     app_mode: Literal["dev", "prod"] = "dev"

@@ -106,7 +106,9 @@ def _coerce(f: Field, value: Any) -> Any:
             value = json.loads(value)
         if not isinstance(value, dict):
             raise ValueError("must be a set of column names")
-        out = {k: str(v) for k, v in value.items() if k in DEFAULT_COLUMN_MAP}
+        # Anything the form did not mention keeps the default header, so a map saved before a column
+        # existed does not leave that column unread. A column switched off is sent as "" and stays off.
+        out = {**DEFAULT_COLUMN_MAP, **{k: str(v) for k, v in value.items() if k in DEFAULT_COLUMN_MAP}}
         missing = [k for k in ("so_no", "customer_name", "real_status") if not out.get(k)]
         if missing:
             raise ValueError("these columns are required: " + ", ".join(missing))
